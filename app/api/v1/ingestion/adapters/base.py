@@ -9,12 +9,17 @@ FIELD_CANDIDATES(정규화 필드→raw 키 후보) + fetch_raw 만 구현하면
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Optional
+
+logger = logging.getLogger("gayoje.ingest")
 
 # ===== 가요제/노래대회 선별 규칙 (제목 기준) =====
 # [배경] 실데이터(전국공연행사정보표준데이터) 점검 결과, 단순 키워드(합창/싱어/보컬/
@@ -112,11 +117,18 @@ async def http_fetch_records(
     *,
     num_of_rows: int = 100,
     page_no: int = 1,
-    timeout_sec: int = 20,
+    timeout_sec: int = 30,
     extra_params: Optional[dict] = None,
     client: Any = None,
+    max_retries: int = 3,
+    backoff_base: float = 1.0,
 ) -> list[dict]:
-    """공공 OpenAPI httpx 호출 → record 목록. (라이브 키 없으면 호출하지 않음.)"""
+    """공공 OpenAPI httpx 호출 → record 목록 (재시도/백오프 포함, INGEST-E2-T1 quick).
+
+    transient 오류(타임아웃·연결오류·5xx·429)는 지수 백오프로 재시도, 소진 시 raise.
+    4xx(429 제외)는 재시도 무의미하므로 즉시 raise. 정상 200 의 비-JSON(에러 XML 등)은 [].
+    data.go.kr 응답 값의 unescaped 제어문자 방어로 strict=False 파싱.
+    """
     import httpx
 
     # 응답 포맷 파라미터는 소스마다 다름(표준데이터=type, TourAPI=_type) → 어댑터가
@@ -131,15 +143,39 @@ async def http_fetch_records(
     owns = client is None
     client = client or httpx.AsyncClient(timeout=timeout_sec)
     try:
-        resp = await client.get(base_url, params=params)
-        resp.raise_for_status()
-        # data.go.kr 응답 값에 제어문자(\n,\t 등)가 unescaped 로 섞여 strict JSON
-        # 파싱이 깨지는 사례가 있어 strict=False. 비-JSON(에러 XML 등)이면 빈 목록.
-        try:
-            data = json.loads(resp.text, strict=False)
-        except json.JSONDecodeError:
-            return []
-        return extract_records(data)
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await client.get(base_url, params=params)
+                # 5xx / 429 → transient 으로 보고 재시도.
+                if resp.status_code >= 500 or resp.status_code == 429:
+                    raise httpx.HTTPStatusError(
+                        f"transient HTTP {resp.status_code}",
+                        request=resp.request, response=resp,
+                    )
+                resp.raise_for_status()  # 그 외 4xx 는 즉시 raise(재시도 무의미)
+                try:
+                    data = json.loads(resp.text, strict=False)
+                except json.JSONDecodeError:
+                    return []
+                return extract_records(data)
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                last_exc = e
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                if not (code >= 500 or code == 429):
+                    raise  # 비-transient 4xx → 즉시 실패
+                last_exc = e
+            if attempt < max_retries:
+                delay = backoff_base * (2 ** attempt) + random.uniform(0, 0.4)
+                logger.warning(
+                    "ingest fetch 재시도 %d/%d (%s, page=%s) — %.1fs 후",
+                    attempt + 1, max_retries,
+                    type(last_exc).__name__, page_no, delay,
+                )
+                await asyncio.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
     finally:
         if owns:
             await client.aclose()
