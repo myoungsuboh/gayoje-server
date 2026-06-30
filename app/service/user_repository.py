@@ -20,15 +20,13 @@ logger = logging.getLogger(__name__)
 
 
 # ===== 도메인 모델 =====
-# Subscription 상수는 `app/core/subscription.py` 가 단일 source of truth.
-# 여기서 re-export 하여 기존 import 경로 (from app.service.user_repository import SUBSCRIPTION_FREE)
-# 호환 유지. lightweight 모듈 (예: app.core.quota) 은 직접 app.core.subscription 에서 import →
-# token_encryption / config / settings 평가 chain 회피.
-from app.core.subscription import (  # noqa: F401 — re-export
-    SUBSCRIPTION_FREE,
-    SUBSCRIPTION_PRO,
-    SUBSCRIPTION_TYPES,
-)
+# Subscription 등급 상수 — harness 의 app/core/subscription.py 가 STRIP §4 에서 제거됨에 따라
+# 최소 상수만 로컬 정의(이 모듈이 User 모델의 owner). 가요제 결제(PAY) 단계에서 정식 등급
+# 체계(토스 연동)로 재정의 예정. 기존 import 경로
+# (from app.service.user_repository import SUBSCRIPTION_FREE) 호환 유지.
+SUBSCRIPTION_FREE = "free"
+SUBSCRIPTION_PRO = "pro"
+SUBSCRIPTION_TYPES = (SUBSCRIPTION_FREE, SUBSCRIPTION_PRO)
 
 
 class UserInDB(BaseModel):

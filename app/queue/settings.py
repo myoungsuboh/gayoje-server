@@ -58,12 +58,12 @@ def redis_settings() -> RedisSettings:
 # Pro/Pro+/Pro Max 사용자 작업과 Free 사용자 작업을 다른 큐로 라우팅 →
 # Free 사용자 폭증이 Pro 처리 SLA 를 깨지 않게 격리.
 # 워커 구성 (docker-compose):
-#   worker-pro  → ARQ_QUEUE_NAME=harness:jobs:pro  (Pro 전용 SLA 보장)
-#   worker-free → ARQ_QUEUE_NAME=harness:jobs:free (Free 처리)
-# 단일 워커 운영 시: ARQ_QUEUE_NAME=harness:jobs (legacy 통합) — 기존 호환.
-QUEUE_NAME = os.getenv("ARQ_QUEUE_NAME", "harness:jobs")
+#   worker-pro  → ARQ_QUEUE_NAME=gayoje:jobs:pro  (Pro 전용 SLA 보장)
+#   worker-free → ARQ_QUEUE_NAME=gayoje:jobs:free (Free 처리)
+# 단일 워커 운영 시: ARQ_QUEUE_NAME=gayoje:jobs (legacy 통합) — 기존 호환.
+QUEUE_NAME = os.getenv("ARQ_QUEUE_NAME", "gayoje:jobs")
 # [기본값 정책] 두 env 미설정 시 PRO=FREE=QUEUE_NAME → 단일 워커 dev 환경 backward compat.
-# 운영에서 분리하려면 두 env 모두 명시 (예: harness:jobs:pro / harness:jobs:free)
+# 운영에서 분리하려면 두 env 모두 명시 (예: gayoje:jobs:pro / gayoje:jobs:free)
 # 후 worker-pro / worker-free 컨테이너의 ARQ_QUEUE_NAME 을 각각 설정.
 PRO_QUEUE_NAME = os.getenv("ARQ_QUEUE_NAME_PRO") or QUEUE_NAME
 FREE_QUEUE_NAME = os.getenv("ARQ_QUEUE_NAME_FREE") or QUEUE_NAME
