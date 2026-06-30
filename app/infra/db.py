@@ -93,6 +93,17 @@ async def check_db() -> bool:
         return result.scalar() == 1
 
 
+async def create_all(metadata) -> None:
+    """모델 메타데이터의 테이블 생성(없으면) — PoC/로컬·테스트용. 운영 스키마는 Alembic.
+
+    호출 전 모델 모듈을 import 해 테이블이 metadata 에 등록돼 있어야 한다
+    (예: app.infra.base.Base.metadata + festivals.models import).
+    """
+    eng = get_engine()
+    async with eng.begin() as conn:
+        await conn.run_sync(metadata.create_all)
+
+
 async def dispose_engine() -> None:
     """엔진/풀 정리 — lifespan 종료 시."""
     global _engine, _sessionmaker
