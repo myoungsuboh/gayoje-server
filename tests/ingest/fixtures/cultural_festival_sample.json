@@ -1,35 +1,46 @@
 {
   "response": {
-    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "header": { "resultCode": "00", "resultMsg": "NORMAL_SERVICE", "type": "json" },
     "body": {
-      "numOfRows": 2,
-      "pageNo": 1,
-      "totalCount": 2,
-      "items": {
-        "item": [
-          {
-            "관리번호": "BOSEONG-2026-01",
-            "축제명": "보성 트로트 가요제",
-            "주최기관명": "보성군",
-            "개최장소": "보성 차밭 특설무대",
-            "소재지도로명주소": "전라남도 보성군 보성읍 녹차로 763",
-            "축제시작일자": "2026-05-10",
-            "축제종료일자": "2026-05-11",
-            "홈페이지주소": "https://www.boseong.go.kr",
-            "데이터기준일자": "2026-06-01"
-          },
-          {
-            "관리번호": "GANGJIN-2026-02",
-            "축제명": "강진 청자축제",
-            "주최기관명": "강진군",
-            "개최장소": "강진 청자박물관 일원",
-            "소재지도로명주소": "전라남도 강진군 대구면 청자촌길 33",
-            "축제시작일자": "2026-09-01",
-            "축제종료일자": "2026-09-07",
-            "데이터기준일자": "2026-06-01"
-          }
-        ]
-      }
+      "items": [
+        {
+          "fstvlNm": "보성 트로트 가요제",
+          "opar": "보성 차밭 특설무대",
+          "fstvlStartDate": "2026-05-10",
+          "fstvlEndDate": "2026-05-11",
+          "fstvlCo": "트로트 경연 + 축하공연",
+          "mnnstNm": "보성군",
+          "auspcInsttNm": "보성문화재단",
+          "suprtInsttNm": "전라남도",
+          "phoneNumber": "061-850-5000",
+          "homepageUrl": "https://www.boseong.go.kr",
+          "rdnmadr": "전라남도 보성군 보성읍 녹차로 763",
+          "lnmadr": "전라남도 보성군 보성읍 봉산리 1",
+          "latitude": "34.7715",
+          "longitude": "127.0800",
+          "referenceDate": "2026-02-01",
+          "insttCode": "4900000",
+          "insttNm": "전라남도 보성군"
+        },
+        {
+          "fstvlNm": "강진 청자축제",
+          "opar": "강진 청자박물관 일원",
+          "fstvlStartDate": "2026-09-01",
+          "fstvlEndDate": "2026-09-07",
+          "fstvlCo": "청자 전시 + 체험",
+          "mnnstNm": "강진군",
+          "auspcInsttNm": "강진군",
+          "phoneNumber": "061-430-3000",
+          "rdnmadr": "전라남도 강진군 대구면 청자촌길 33",
+          "latitude": "34.6300",
+          "longitude": "126.7670",
+          "referenceDate": "2026-02-01",
+          "insttNm": "전라남도 강진군"
+        }
+      ],
+      "totalCount": "2",
+      "numOfRows": "1000",
+      "pageNo": "1"
     }
   }
 }

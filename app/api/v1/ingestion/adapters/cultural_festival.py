@@ -12,16 +12,17 @@ from app.api.v1.ingestion.adapters.base import BaseSourceAdapter, http_fetch_rec
 class CulturalFestivalAdapter(BaseSourceAdapter):
     SOURCE_KEY = "cultural_festival"
     SOURCE_SYSTEM = "data_go_kr:nationwide_cultural_festival_std"
+    # 실 API 검증(2026-07): 엔드포인트·필드명 라이브 응답으로 확정.
     DEFAULT_BASE_URL = "https://api.data.go.kr/openapi/tn_pubr_public_cltur_fstvl_api"
+    # 실 응답 키(fstvlNm/opar/fstvlStartDate 등). 관리번호 없음 → 합성 ID.
     FIELD_CANDIDATES = {
-        "title": ("축제명", "fstvlNm", "공연행사명"),
-        "host": ("주최기관명", "주관기관명", "mnnstNm"),
-        "address": ("소재지도로명주소", "rdnmadr"),
-        "venue": ("개최장소", "공연시설명", "fcltyNm"),
-        "start": ("축제시작일자", "fstvlStartDate", "행사시작일자"),
-        "end": ("축제종료일자", "fstvlEndDate", "행사종료일자"),
-        "url": ("홈페이지주소", "homepageUrl"),
-        "id": ("관리번호", "id"),
+        "title": ("fstvlNm",),
+        "host": ("mnnstNm", "auspcInsttNm", "insttNm"),  # 주최·주관·제공기관
+        "address": ("rdnmadr", "lnmadr"),
+        "venue": ("opar",),                              # 개최장소
+        "start": ("fstvlStartDate",),
+        "end": ("fstvlEndDate",),
+        "url": ("homepageUrl",),
     }
 
     async def fetch_raw(
