@@ -15,6 +15,32 @@ _DEFAULT_JWT_SECRET_PLACEHOLDER = "change-me-to-a-long-random-secret-string"
 # 운영에서 요구되는 JWT secret 최소 길이 (256 bit / 32 byte 이상 권장).
 _JWT_SECRET_MIN_LENGTH = 32
 
+# ===== 시크릿 마스킹 (BE-E01-T02) =====
+# 로그/디버그 요약에서 평문 시크릿이 새지 않도록. 필드 이름에 아래 토큰이 들어가면
+# 시크릿으로 간주해 마스킹.
+_SECRET_FIELD_HINTS = ("KEY", "SECRET", "PASSWORD", "TOKEN", "DSN")
+
+
+def mask_secret(value: Optional[str], show: int = 4) -> str:
+    """시크릿 값을 로그용으로 마스킹 — 앞 show 자만 남기고 나머지 ***."""
+    if not value:
+        return ""
+    s = str(value)
+    if len(s) <= show:
+        return "***"
+    return s[:show] + "***"
+
+
+def mask_db_url(url: str) -> str:
+    """DB/Redis URL 의 자격증명(password) 만 마스킹.
+
+    예: postgresql+asyncpg://user:secret@host:5432/db → .../user:***@host:5432/db
+    자격증명이 없으면(sqlite, http://localhost 등) 원본 그대로.
+    """
+    import re
+
+    return re.sub(r"(://[^:/@]+:)[^@]+@", r"\1***@", str(url))
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -23,9 +49,14 @@ class Settings(BaseSettings):
         extra="ignore",  # .env에 정의 안 된 변수가 있어도 무시
     )
 
-    # 실행 환경
+    # 실행 환경 — development | staging | production (is_* 헬퍼로 분기).
     ENV: str = "development"
     PORT: int = 8000
+
+    # ===== PostgreSQL (사용자/결제/정형 데이터 주력 SOR) — BE-E01-T02/T03 =====
+    # 예: postgresql+asyncpg://user:pw@host:5432/gayoje
+    # 로컬 개발은 sqlite 폴백(편의). 운영/수집(INGEST)은 PG 필수.
+    DATABASE_URL: str = "sqlite+aiosqlite:///./gayoje_dev.db"
 
     # JWT
     JWT_SECRET_KEY: str = "change-me-to-a-long-random-secret-string"
@@ -48,6 +79,20 @@ class Settings(BaseSettings):
     # [2026-05-18] STT (음성 파일 업로드 → /api/gateway/transcribeAudio) 가
     # 최대 30MB 파일을 multipart 로 받으므로 30MB 로 상향.
     MAX_REQUEST_BODY_BYTES: int = 30 * 1024 * 1024  # 30MB
+
+    # ===== Feature flags (재배포 없이 env 토글) — BE-E01-T02 =====
+    # 기능을 점진 활성/긴급 차단. payments=Phase 2, notifications=Phase 1+,
+    # 크롤러=INGEST-E3. 공공 API 수집(북극성 PoC 대상)만 기본 on.
+    FEATURE_PAYMENTS: bool = False
+    FEATURE_NOTIFICATIONS: bool = False
+    FEATURE_INGEST_CRAWLER: bool = False
+    FEATURE_INGEST_PUBLIC_API: bool = True
+
+    # ===== 공공데이터 수집 (INGEST) — BE-E01-T02 =====
+    # 공공데이터포털(data.go.kr) 서비스키 — 표준데이터/문화축제 OpenAPI 인증.
+    # 다중키는 콤마 구분(쿼터 로테이션 — INGEST-E2-T2). 미설정 시 수집 잡이 호출 시점에 실패.
+    DATA_GO_KR_SERVICE_KEY: Optional[str] = None
+    PUBLIC_API_TIMEOUT_SEC: int = 20
 
     # Pipelines — Neo4j + Gemini.
     # 모두 Optional: 값이 없으면 파이프라인 라우트는 import 시점에 실패하지 않고
@@ -415,6 +460,48 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENV.lower() == "production"
+
+    @property
+    def is_staging(self) -> bool:
+        return self.ENV.lower() in ("staging", "stg")
+
+    @property
+    def is_development(self) -> bool:
+        """production/staging 이 아니면 개발 환경."""
+        return not (self.is_production or self.is_staging)
+
+    @property
+    def data_go_kr_service_keys(self) -> List[str]:
+        """공공데이터 서비스키 목록 (다중키 로테이션용)."""
+        raw = (self.DATA_GO_KR_SERVICE_KEY or "").replace(",", " ").split()
+        return [k.strip() for k in raw if k.strip()]
+
+    def feature_flags(self) -> dict:
+        """현재 feature flag 스냅샷 (관측/디버그용)."""
+        return {
+            "payments": self.FEATURE_PAYMENTS,
+            "notifications": self.FEATURE_NOTIFICATIONS,
+            "ingest_crawler": self.FEATURE_INGEST_CRAWLER,
+            "ingest_public_api": self.FEATURE_INGEST_PUBLIC_API,
+        }
+
+    def safe_summary(self) -> dict:
+        """시크릿을 마스킹한 설정 요약 — 부팅 로그/디버그용(평문 시크릿 미노출).
+
+        - *_URL: 자격증명(password)만 마스킹.
+        - KEY/SECRET/PASSWORD/TOKEN/DSN 포함 필드: 앞 4자만 노출.
+        properties/메서드(Paddle 등)는 호출하지 않으므로 dormant 지연 import 도 안전.
+        """
+        out: dict = {}
+        for name, value in self.model_dump().items():
+            upper = name.upper()
+            if value and upper.endswith("_URL"):
+                out[name] = mask_db_url(str(value))
+            elif value and any(h in upper for h in _SECRET_FIELD_HINTS):
+                out[name] = mask_secret(str(value))
+            else:
+                out[name] = value
+        return out
 
     # ===== 부팅 시점 시크릿 검증 (운영 환경 한정) =====
     #
