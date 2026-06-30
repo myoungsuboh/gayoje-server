@@ -34,8 +34,9 @@ def test_version_endpoint_200_and_camelcase():
 
 def test_v1_prefix_applied():
     assert client.get("/api/v1/version").status_code == 200
-    # prefix 없는 경로는 404
-    assert client.get("/version").status_code == 404
+    # 도메인 라우터는 /api/v1 prefix 아래에만 — 임의 미존재 경로는 404
+    assert client.get("/api/v1/does-not-exist").status_code == 404
+    assert client.get("/totally-unknown-root").status_code == 404
 
 
 def test_all_domains_auto_registered():

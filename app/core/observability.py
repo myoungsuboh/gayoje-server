@@ -29,7 +29,31 @@ import sys
 from typing import Optional
 
 from app.core.config import settings
+from app.core.pii import mask_email_partial, mask_pii
 from app.core.request_context import _ContextFilter, install_request_context_logging
+
+
+class PiiMaskingFilter(logging.Filter):
+    """로그 레코드의 메시지/user_email 에서 PII 마스킹 (BE-E01-T06).
+
+    - 메시지(getMessage): 이메일/전화번호 전체 마스킹.
+    - user_email 상관 필드: 앞 1자+도메인만 보존(부분 마스킹).
+    _ContextFilter 뒤에 부착해 user_email 이 채워진 뒤 마스킹한다.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:  # noqa: BLE001 — 로깅이 절대 죽지 않게
+            return True
+        masked = mask_pii(msg)
+        if masked != msg:
+            record.msg = masked
+            record.args = ()
+        ue = getattr(record, "user_email", None)
+        if ue and ue != "-":
+            record.user_email = mask_email_partial(ue)
+        return True
 
 
 # ===== JSON 포맷터 =====
@@ -109,6 +133,8 @@ def setup_logging() -> None:
         handler.setFormatter(logging.Formatter(_TEXT_FORMAT))
     # request_id / user_email 첨부 필터 — text/json 양쪽 모두 필요.
     handler.addFilter(_ContextFilter())
+    # PII 마스킹 — _ContextFilter 뒤(user_email 채워진 뒤) 부착.
+    handler.addFilter(PiiMaskingFilter())
 
     # 기존 핸들러 제거 후 교체 (basicConfig 잔재 / 재호출 멱등성).
     for h in list(root.handlers):

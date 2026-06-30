@@ -25,6 +25,7 @@ from app.api.v1 import build_v1_router
 from app.clients import neo4j_client
 from app.common import APP_VERSION
 from app.common.exception_handlers import install_exception_handlers
+from app.common.timezone import now_kst_iso
 from app.core.body_size_limit import install_body_size_limit
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -61,9 +62,12 @@ async def health() -> dict:
     return {"status": "healthy"}
 
 
-@limiter.exempt
-async def health_deep() -> dict:
-    """의존성(PostgreSQL + Neo4j + Redis)까지 검증. 모두 OK→200, 하나라도 실패→503."""
+async def _check_dependencies() -> tuple[list[str], dict]:
+    """PostgreSQL/Neo4j/Redis 의존성 점검 — (failures, results) 반환.
+
+    health_deep(상세) 와 readyz(레디니스)가 공유. 모듈 레벨 check_db/neo4j_client/
+    queue_client 를 사용하므로 테스트가 패치 가능.
+    """
     results: dict = {"postgres": "unknown", "neo4j": "unknown", "redis": "unknown"}
     failures: list[str] = []
 
@@ -96,12 +100,48 @@ async def health_deep() -> dict:
         results["redis"] = f"error: {type(e).__name__}"
         failures.append("redis")
 
+    return failures, results
+
+
+@limiter.exempt
+async def health_deep() -> dict:
+    """의존성(PostgreSQL + Neo4j + Redis) 상세 검증. 모두 OK→200, 하나라도 실패→503."""
+    failures, results = await _check_dependencies()
     body = {"status": "healthy" if not failures else "degraded", "checks": results}
     if failures:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=body
         )
     return body
+
+
+@limiter.exempt
+async def healthz() -> dict:
+    """레디니스와 분리된 라이브니스 — 프로세스 생존만(의존성 미점검)."""
+    return {"status": "healthy"}
+
+
+@limiter.exempt
+async def readyz() -> dict:
+    """레디니스 — 의존성 준비됐을 때만 200. 미준비 시 503(트래픽 라우팅 보류용)."""
+    failures, results = await _check_dependencies()
+    if failures:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"status": "not_ready", "checks": results},
+        )
+    return {"status": "ready", "checks": results}
+
+
+@limiter.exempt
+async def version_info() -> dict:
+    """배포/환경 메타 (unversioned). /api/v1/version 과 동일 내용."""
+    return {
+        "service": "gayoje-server",
+        "version": APP_VERSION,
+        "env": settings.ENV,
+        "serverTime": now_kst_iso(),
+    }
 
 
 @limiter.exempt
@@ -147,7 +187,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ===== 헬스 =====
+    # ===== 헬스/레디니스 (BE-E01-T06) =====
+    # /healthz=라이브니스, /readyz=레디니스(의존성), /healthz/deep=상세, /version.
+    # /health·/health/deep 는 하위호환 alias.
+    app.add_api_route("/healthz", healthz, methods=["GET"], tags=["Health"])
+    app.add_api_route("/readyz", readyz, methods=["GET"], tags=["Health"])
+    app.add_api_route("/healthz/deep", health_deep, methods=["GET"], tags=["Health"])
+    app.add_api_route("/version", version_info, methods=["GET"], tags=["Health"])
     app.add_api_route("/health", health, methods=["GET"], tags=["Health"])
     app.add_api_route("/health/deep", health_deep, methods=["GET"], tags=["Health"])
     app.add_api_route(
