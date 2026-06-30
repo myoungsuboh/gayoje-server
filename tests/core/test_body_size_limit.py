@@ -84,29 +84,6 @@ def test_413_response_includes_limit_in_message():
     detail = resp.json()["detail"]
     assert "1MB" in detail or "MB" in detail
 
-
-# ─── Pydantic max_length on meeting_content ──────────────
-
-
-def test_cps_request_meeting_content_has_max_length():
-    """[회귀] CpsRequest.meeting_content 가 max_length 갖춤 (defense in depth)."""
-    from app.api.v2_routes import CpsRequest
-
-    field = CpsRequest.model_fields["meeting_content"]
-    # Pydantic v2 — metadata 안 MaxLen
-    has_max = any(
-        getattr(m, "max_length", None) is not None
-        for m in getattr(field, "metadata", [])
-    )
-    assert has_max, "meeting_content max_length 미설정"
-
-
-def test_post_meeting_request_meeting_content_has_max_length():
-    from app.api.v2_routes import PostMeetingRequest
-
-    field = PostMeetingRequest.model_fields["meeting_content"]
-    has_max = any(
-        getattr(m, "max_length", None) is not None
-        for m in getattr(field, "metadata", [])
-    )
-    assert has_max
+# NOTE: meeting_content max_length(CpsRequest/PostMeetingRequest) 회귀 테스트는
+#       harness 도메인 v2_routes 제거(STRIP §6)와 함께 삭제. 가요제 요청 모델의
+#       max_length 방어는 Phase 0 에서 해당 DTO 정의와 함께 재작성한다.
