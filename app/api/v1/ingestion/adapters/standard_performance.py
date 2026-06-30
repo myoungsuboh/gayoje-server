@@ -41,5 +41,6 @@ class StandardPerformanceAdapter(BaseSourceAdapter):
             base_url or self.DEFAULT_BASE_URL,
             num_of_rows=num_of_rows,
             page_no=page_no,
+            extra_params={"type": "json"},  # 표준데이터: type=json
             client=client,
         )

@@ -32,10 +32,17 @@ class TourApiAdapter(BaseSourceAdapter):
         base_url: str | None = None,
         num_of_rows: int = 100,
         page_no: int = 1,
+        event_start_date: str = "20240101",  # 필수 — 이 날짜 이후 시작 행사
         area_code: Optional[str] = None,
         client: Any = None,
     ) -> list[dict]:
-        extra = {"MobileOS": "ETC", "MobileApp": "gayoje", "_type": "json"}
+        # TourAPI: 응답 포맷은 _type(type 아님), eventStartDate 필수.
+        extra = {
+            "MobileOS": "ETC",
+            "MobileApp": "gayoje",
+            "_type": "json",
+            "eventStartDate": str(event_start_date),
+        }
         if area_code:
             extra["areaCode"] = area_code
         return await http_fetch_records(

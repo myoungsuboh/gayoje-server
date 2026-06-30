@@ -119,11 +119,12 @@ async def http_fetch_records(
     """공공 OpenAPI httpx 호출 → record 목록. (라이브 키 없으면 호출하지 않음.)"""
     import httpx
 
+    # 응답 포맷 파라미터는 소스마다 다름(표준데이터=type, TourAPI=_type) → 어댑터가
+    # extra_params 로 지정. 여기서 강제하지 않는다.
     params = {
         "serviceKey": service_key,
         "numOfRows": num_of_rows,
         "pageNo": page_no,
-        "type": "json",
     }
     if extra_params:
         params.update(extra_params)

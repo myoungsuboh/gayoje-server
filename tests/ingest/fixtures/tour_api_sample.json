@@ -9,20 +9,31 @@
         "item": [
           {
             "contentid": "2784012",
+            "contenttypeid": "15",
             "title": "정선 아리랑 가요제",
             "addr1": "강원특별자치도 정선군 정선읍 정선로 1100",
+            "addr2": "",
             "eventstartdate": "20260710",
             "eventenddate": "20260712",
-            "eventplace": "정선아리랑센터 대공연장",
-            "tel": "033-560-0000"
+            "tel": "033-560-0000",
+            "areacode": "32",
+            "sigungucode": "11",
+            "mapx": "128.6600",
+            "mapy": "37.3800",
+            "firstimage": "http://tong.visitkorea.or.kr/sample.jpg",
+            "festivaltype": ""
           },
           {
             "contentid": "126508",
+            "contenttypeid": "15",
             "title": "보령 머드축제",
             "addr1": "충청남도 보령시 신흑동 대천해수욕장",
             "eventstartdate": "20260718",
             "eventenddate": "20260727",
-            "eventplace": "대천해수욕장 머드광장"
+            "tel": "041-930-0000",
+            "areacode": "34",
+            "mapx": "126.5100",
+            "mapy": "36.3300"
           }
         ]
       }
