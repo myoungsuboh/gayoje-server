@@ -13,21 +13,23 @@ import pytest
 from sqlalchemy import select
 
 from app.api.v1.festivals.models import FestivalEvent
+from app.api.v1.ingestion.adapters.base import extract_records
 from app.api.v1.ingestion.adapters.standard_performance import (
-    SOURCE_SYSTEM,
-    _extract_records,
+    StandardPerformanceAdapter,
 )
 from app.api.v1.ingestion.service import ingest_records
 from app.core.config import settings
 
 pytestmark = pytest.mark.asyncio
 
+_ADAPTER = StandardPerformanceAdapter()
+SOURCE_SYSTEM = _ADAPTER.SOURCE_SYSTEM
 _FIXTURE = Path(__file__).parent / "fixtures" / "standard_performance_sample.json"
 
 
 def _load_sample() -> list[dict]:
     """녹화 응답에서 record 목록 추출(매 호출 fresh copy)."""
-    return _extract_records(json.loads(_FIXTURE.read_text(encoding="utf-8")))
+    return extract_records(json.loads(_FIXTURE.read_text(encoding="utf-8")))
 
 
 @pytest.fixture
@@ -49,7 +51,7 @@ async def test_poc_fetch_normalize_store(db_ready):
     assert len(records) == 3  # 표준 응답에서 3건 추출
 
     async with db_ready.session_scope() as s:
-        counts = await ingest_records(s, records)
+        counts = await ingest_records(s, _ADAPTER,records)
 
     # 2건 가요제(강변가요제·트로트 노래대회) 저장, 1건(교향악단) 필터
     assert counts["inserted"] == 2
@@ -80,9 +82,9 @@ async def test_poc_fetch_normalize_store(db_ready):
 
 async def test_poc_idempotent_rerun(db_ready):
     async with db_ready.session_scope() as s:
-        await ingest_records(s, _load_sample())
+        await ingest_records(s, _ADAPTER,_load_sample())
     async with db_ready.session_scope() as s:
-        counts2 = await ingest_records(s, _load_sample())
+        counts2 = await ingest_records(s, _ADAPTER,_load_sample())
     # 동일 재수집 → 모두 unchanged (멱등)
     assert counts2["unchanged"] == 2
     assert counts2["inserted"] == 0
@@ -94,7 +96,7 @@ async def test_poc_idempotent_rerun(db_ready):
 
 async def test_poc_change_detection_updates(db_ready):
     async with db_ready.session_scope() as s:
-        await ingest_records(s, _load_sample())
+        await ingest_records(s, _ADAPTER,_load_sample())
 
     # 명시 관리번호(GANGBYEON-2026-001) 레코드의 원본 변경 → payload_hash 달라짐 → update
     changed = _load_sample()
@@ -104,7 +106,7 @@ async def test_poc_change_detection_updates(db_ready):
             break
 
     async with db_ready.session_scope() as s:
-        counts = await ingest_records(s, changed)
+        counts = await ingest_records(s, _ADAPTER,changed)
     assert counts["updated"] == 1
     assert counts["unchanged"] == 1
 

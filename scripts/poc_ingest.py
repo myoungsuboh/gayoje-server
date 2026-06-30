@@ -23,18 +23,22 @@ async def _run() -> None:
     from sqlalchemy import select
 
     from app.api.v1.festivals.models import FestivalEvent
-    from app.api.v1.ingestion.adapters.standard_performance import _extract_records
+    from app.api.v1.ingestion.adapters.base import extract_records
+    from app.api.v1.ingestion.adapters.standard_performance import (
+        StandardPerformanceAdapter,
+    )
     from app.api.v1.ingestion.service import ingest_records
     from app.infra import base, db
 
     await db.create_all(base.Base.metadata)
 
+    adapter = StandardPerformanceAdapter()
     fixture = Path("tests/ingest/fixtures/standard_performance_sample.json")
-    records = _extract_records(json.loads(fixture.read_text(encoding="utf-8")))
+    records = extract_records(json.loads(fixture.read_text(encoding="utf-8")))
     print(f"[fetch] 표준데이터 샘플 {len(records)}건")
 
     async with db.session_scope() as session:
-        counts = await ingest_records(session, records)
+        counts = await ingest_records(session, adapter, records)
     print(f"[normalize+store] {counts}")
 
     async with db.session_scope() as session:
