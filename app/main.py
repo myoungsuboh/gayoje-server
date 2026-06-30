@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -23,6 +24,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.api.v1 import build_v1_router
 from app.clients import neo4j_client
 from app.common import APP_VERSION
+from app.common.exception_handlers import install_exception_handlers
 from app.core.body_size_limit import install_body_size_limit
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -126,12 +128,17 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+    # ===== 표준 에러 envelope 핸들러 (BE-E01-T05) =====
+    install_exception_handlers(app)
+
     # ===== 미들웨어 (Starlette LIFO — 마지막 add 가 최외곽 → CORS 최외곽) =====
     if settings.MAX_REQUEST_BODY_BYTES > 0:
         install_body_size_limit(app, max_bytes=settings.MAX_REQUEST_BODY_BYTES)
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(SlowAPIMiddleware)
+    # GZip — 1KB 이상 응답 압축.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
