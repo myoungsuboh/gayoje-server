@@ -12,18 +12,19 @@ from app.api.v1.ingestion.adapters.base import BaseSourceAdapter, http_fetch_rec
 class StandardPerformanceAdapter(BaseSourceAdapter):
     SOURCE_KEY = "standard_performance"
     SOURCE_SYSTEM = "data_go_kr:nationwide_performance_event_std"
+    # 실 API 검증(2026-07): 엔드포인트·필드명 라이브 응답으로 확정.
     DEFAULT_BASE_URL = (
-        "https://api.data.go.kr/openapi/tn_pubr_public_performance_event_api"
+        "https://api.data.go.kr/openapi/tn_pubr_public_pblprfr_event_info_api"
     )
+    # 실 응답 키(eventNm/opar/eventStartDate 등) — 관리번호(ID) 필드 없음 → 합성.
     FIELD_CANDIDATES = {
-        "title": ("공연행사명", "fstvlNm", "title"),
-        "host": ("주최기관명", "주관기관명", "mnnstNm"),
-        "address": ("소재지도로명주소", "소재지지번주소", "rdnmadr"),
-        "venue": ("공연시설명", "fcltyNm"),
-        "start": ("공연행사시작일자", "행사시작일자", "fstvlStartDate"),
-        "end": ("공연행사종료일자", "행사종료일자", "fstvlEndDate"),
-        "url": ("홈페이지주소", "homepageUrl"),
-        "id": ("관리번호", "id"),
+        "title": ("eventNm",),
+        "host": ("mnnstNm", "auspcInsttNm", "insttNm"),  # 주최·주관·제공기관
+        "address": ("rdnmadr", "lnmadr"),                # 도로명·지번
+        "venue": ("opar",),                              # 장소/공연장
+        "start": ("eventStartDate",),
+        "end": ("eventEndDate",),
+        "url": ("homepageUrl",),
     }
 
     async def fetch_raw(

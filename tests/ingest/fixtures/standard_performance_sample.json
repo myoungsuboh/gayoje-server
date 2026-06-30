@@ -1,51 +1,61 @@
 {
   "response": {
-    "header": { "resultCode": "00", "resultMsg": "NORMAL SERVICE." },
+    "header": { "resultCode": "00", "resultMsg": "NORMAL_SERVICE", "type": "json" },
     "body": {
-      "numOfRows": 3,
-      "pageNo": 1,
-      "totalCount": 3,
-      "items": {
-        "item": [
-          {
-            "관리번호": "GANGBYEON-2026-001",
-            "공연행사명": "제30회 강변가요제",
-            "공연행사구분": "경연",
-            "주최기관명": "춘천시",
-            "주관기관명": "춘천문화재단",
-            "공연시설명": "의암호 수변 야외무대",
-            "소재지도로명주소": "강원특별자치도 춘천시 스포츠타운길 245",
-            "공연행사시작일자": "2026-08-15",
-            "공연행사종료일자": "2026-08-15",
-            "관람료": "무료",
-            "홈페이지주소": "https://www.chuncheon.go.kr/festival",
-            "데이터기준일자": "2026-06-01"
-          },
-          {
-            "공연행사명": "전국 트로트 노래대회",
-            "공연행사구분": "경연",
-            "주최기관명": "전주시",
-            "공연시설명": "전주 한옥마을 야외공연장",
-            "소재지도로명주소": "전북특별자치도 전주시 완산구 기린대로 99",
-            "공연행사시작일자": "20260920",
-            "공연행사종료일자": "20260921",
-            "관람료": "무료",
-            "데이터기준일자": "2026-06-01"
-          },
-          {
-            "관리번호": "SEOUL-PHIL-2026-07",
-            "공연행사명": "서울시립교향악단 정기연주회",
-            "공연행사구분": "공연",
-            "주최기관명": "서울특별시",
-            "공연시설명": "세종문화회관 대극장",
-            "소재지도로명주소": "서울특별시 종로구 세종대로 175",
-            "공연행사시작일자": "2026-07-01",
-            "공연행사종료일자": "2026-07-01",
-            "관람료": "30000원",
-            "데이터기준일자": "2026-06-01"
-          }
-        ]
-      }
+      "items": [
+        {
+          "eventNm": "제30회 강변가요제",
+          "eventCo": "공연복합",
+          "eventStartDate": "2026-08-15",
+          "eventEndDate": "2026-08-15",
+          "opar": "의암호 수변 야외무대",
+          "chrgeInfo": "무료",
+          "mnnstNm": "춘천시",
+          "auspcInsttNm": "춘천문화재단",
+          "phoneNumber": "033-250-0000",
+          "homepageUrl": "https://www.chuncheon.go.kr/festival",
+          "rdnmadr": "강원특별자치도 춘천시 스포츠타운길 245",
+          "lnmadr": "강원특별자치도 춘천시 온의동 1",
+          "latitude": "37.8651",
+          "longitude": "127.7269",
+          "referenceDate": "2026-06-01",
+          "insttCode": "4180000",
+          "insttNm": "강원특별자치도 춘천시"
+        },
+        {
+          "eventNm": "전국 트로트 노래대회",
+          "eventCo": "공연복합",
+          "eventStartDate": "2026-09-20",
+          "eventEndDate": "2026-09-21",
+          "opar": "전주 한옥마을 야외공연장",
+          "chrgeInfo": "무료",
+          "mnnstNm": "전주시",
+          "phoneNumber": "063-281-0000",
+          "rdnmadr": "전북특별자치도 전주시 완산구 기린대로 99",
+          "latitude": "35.8150",
+          "longitude": "127.1530",
+          "referenceDate": "2026-06-01",
+          "insttNm": "전북특별자치도 전주시"
+        },
+        {
+          "eventNm": "들꽃이야기",
+          "eventCo": "전시회화",
+          "eventStartDate": "2026-07-01",
+          "eventEndDate": "2026-07-06",
+          "opar": "5갤러리",
+          "chrgeInfo": "무료",
+          "mnnstNm": "한국들꽃아트교육연구소",
+          "homepageUrl": "https://www.andong.go.kr/arts/main.do",
+          "rdnmadr": "경상북도 안동시 축제장길 66",
+          "latitude": "36.5594",
+          "longitude": "128.7250",
+          "referenceDate": "2026-06-01",
+          "insttNm": "경상북도 안동시"
+        }
+      ],
+      "totalCount": "3",
+      "numOfRows": "1000",
+      "pageNo": "1"
     }
   }
 }

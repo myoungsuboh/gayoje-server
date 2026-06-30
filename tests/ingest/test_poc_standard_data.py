@@ -96,24 +96,23 @@ async def test_poc_idempotent_rerun(db_ready):
 
 async def test_poc_change_detection_updates(db_ready):
     async with db_ready.session_scope() as s:
-        await ingest_records(s, _ADAPTER,_load_sample())
+        await ingest_records(s, _ADAPTER, _load_sample())
 
-    # 명시 관리번호(GANGBYEON-2026-001) 레코드의 원본 변경 → payload_hash 달라짐 → update
+    # 실 표준데이터는 관리번호가 없어 ID 는 (title|eventStartDate|opar) 합성 →
+    # ID 기준이 아닌 필드(주최 mnnstNm) 를 바꿔 payload_hash 만 달라지게 → update.
     changed = _load_sample()
     for rec in changed:
-        if rec.get("관리번호") == "GANGBYEON-2026-001":
-            rec["공연시설명"] = "변경된 무대"
+        if rec.get("eventNm") == "제30회 강변가요제":
+            rec["mnnstNm"] = "춘천시(주최 변경)"
             break
 
     async with db_ready.session_scope() as s:
-        counts = await ingest_records(s, _ADAPTER,changed)
+        counts = await ingest_records(s, _ADAPTER, changed)
     assert counts["updated"] == 1
     assert counts["unchanged"] == 1
 
     async with db_ready.session_scope() as s:
         row = await s.scalar(
-            select(FestivalEvent).where(
-                FestivalEvent.source_record_id == "GANGBYEON-2026-001"
-            )
+            select(FestivalEvent).where(FestivalEvent.title == "제30회 강변가요제")
         )
-    assert row is not None and row.venue == "변경된 무대"
+    assert row is not None and row.host_org == "춘천시(주최 변경)"

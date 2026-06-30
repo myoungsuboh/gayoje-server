@@ -38,7 +38,8 @@ def test_feature_flags_default_and_toggle():
 def test_data_go_kr_multi_key_parsing():
     s = _s(DATA_GO_KR_SERVICE_KEY="keyA, keyB  keyC")
     assert s.data_go_kr_service_keys == ["keyA", "keyB", "keyC"]
-    assert _s().data_go_kr_service_keys == []
+    # 빈 값 명시(.env 의 실 키가 os.environ 에 올라와도 init kwarg 가 우선 → 환경 비의존)
+    assert _s(DATA_GO_KR_SERVICE_KEY="").data_go_kr_service_keys == []
 
 
 def test_mask_helpers():

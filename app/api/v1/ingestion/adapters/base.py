@@ -16,11 +16,36 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Optional
 
-# 가요제/노래대회 선별 키워드(제목 기준) — 모든 어댑터 공통.
-GAYOJE_KEYWORDS = (
-    "가요제", "노래대회", "가요대회", "트로트", "보컬", "싱어",
-    "동요제", "합창", "음악경연", "노래자랑",
+# ===== 가요제/노래대회 선별 규칙 (제목 기준) =====
+# [배경] 실데이터(전국공연행사정보표준데이터) 점검 결과, 단순 키워드(합창/싱어/보컬/
+# 트로트 단독)는 합창단 정기연주회·싱어롱콘서트 등 '엉뚱한 행사'를 대량 오선별했다.
+# → '가창 관련어' + '경연/대회 신호' 조합 규칙으로 정밀화(precision 우선).
+#
+# 규칙: STRONG(단독 확정) OR (가창어 SINGING AND 경연어 CONTEST).
+# 공백 제거 후 매칭("노래 대회" → "노래대회"). 추후 실데이터로 계속 보정.
+
+# 단독으로 가요제/노래대회 확정.
+_STRONG_GAYOJE = (
+    "가요제", "가요대회", "노래대회", "노래자랑", "동요제",
+    "트로트가요제", "트롯가요제",
 )
+# 가창 관련어(이것만으로는 부족 — 경연어와 함께여야).
+_SINGING = ("가요", "노래", "트로트", "트롯", "보컬", "가창", "k팝", "케이팝")
+# 경연/대회 신호.
+_CONTEST = ("대회", "경연", "콘테스트", "오디션", "선발", "챔피언", "자랑")
+
+
+def is_gayoje(title: Optional[str]) -> bool:
+    """제목이 가요제/노래대회 성격인지 판정 (precision 우선 규칙)."""
+    if not title:
+        return False
+    t = title.replace(" ", "")
+    low = t.lower()
+    if any(k in t for k in _STRONG_GAYOJE):
+        return True
+    has_singing = any(s in low for s in _SINGING)
+    has_contest = any(c in t for c in _CONTEST)
+    return has_singing and has_contest
 
 
 @dataclass
@@ -36,10 +61,6 @@ class NormalizedEvent:
     venue: Optional[str]
     start_date: Optional[date]
     end_date: Optional[date]
-
-
-def is_gayoje(title: Optional[str]) -> bool:
-    return bool(title) and any(k in title for k in GAYOJE_KEYWORDS)
 
 
 def first_value(raw: dict, keys: tuple[str, ...]) -> Optional[str]:
@@ -111,7 +132,13 @@ async def http_fetch_records(
     try:
         resp = await client.get(base_url, params=params)
         resp.raise_for_status()
-        return extract_records(resp.json())
+        # data.go.kr 응답 값에 제어문자(\n,\t 등)가 unescaped 로 섞여 strict JSON
+        # 파싱이 깨지는 사례가 있어 strict=False. 비-JSON(에러 XML 등)이면 빈 목록.
+        try:
+            data = json.loads(resp.text, strict=False)
+        except json.JSONDecodeError:
+            return []
+        return extract_records(data)
     finally:
         if owns:
             await client.aclose()
