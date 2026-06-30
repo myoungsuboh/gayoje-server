@@ -1,0 +1,101 @@
+# Caddy reverse proxy — automatic HTTPS via Let's Encrypt.
+#
+# [동작]
+# - 환경변수 `$BACKEND_DOMAIN` 에 들어있는 도메인으로 HTTPS 서비스
+#   → 자동으로 Let's Encrypt 인증서 발급/갱신 (90일 주기)
+#   → 백엔드 컨테이너(backend:8000) 로 reverse proxy
+# - HTTP(80) 는 HTTPS 로 강제 redirect (CSP/HSTS 일관)
+#
+# [필수 env var]
+# - BACKEND_DOMAIN  : 예) api.example.com
+# - ACME_EMAIL      : Let's Encrypt 알림용 이메일 (만료 임박 통지)
+#
+# [DNS 사전 작업]
+# 도메인의 A 레코드를 Vultr 호스트 IP (YOUR_SERVER_IP) 로 설정 후
+# 이 stack 부팅. Caddy 가 HTTP-01 challenge 로 인증서 자동 발급.
+#
+# [캡처]
+# 발급된 인증서 + 갱신 메타는 caddy_data 볼륨에 영구 보관 — 재배포해도 동일 인증서 재사용.
+{
+	# Let's Encrypt 등록 이메일 — 인증서 만료 등 운영 알림 수신용.
+	# ACME_EMAIL 미설정 시 placeholder@example.com 사용. `.com` 은 valid TLD 라
+	# Let's Encrypt 의 email 형식/TLD 검증 통과 (실제 도달성은 검증 안 함).
+	# 실제 운영에선 .env 의 ACME_EMAIL 을 본인 이메일로 채울 것 — 인증서 만료
+	# 임박 알림이 거기로 옴.
+	# ⚠️ `.invalid` 같은 reserved TLD 는 절대 사용 금지 (Let's Encrypt 가 즉시 거부).
+	email {$ACME_EMAIL:placeholder@example.com}
+
+	# 운영 외 환경 (dev / staging) 에서 staging CA 로 빨리 시험하려면
+	# 아래 한 줄을 일시 활성화. 정식 운영에선 절대 켜지 말 것 (브라우저 untrusted).
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ─── HTTPS 서비스 ─────────────────────────────────────────────────
+#
+# `$BACKEND_DOMAIN` 이 set 되어 있어야 이 사이트가 활성화됨.
+# 미설정 시 `localhost` 로 fallback — Caddy 가 localhost / *.localhost / IP
+# 주소는 special-case 로 처리해 public ACME 안 거치고 internal self-signed
+# cert 발급 (RFC 8555 의 "internal" 분류). 결과:
+#  - Let's Encrypt 호출 없음 → rate limit 위험 0
+#  - 외부 IP 로 접근 시 Host header mismatch → 이 site block 매칭 안 됨
+#  - 안전한 noop — 도메인 채우기 전까지 모든 외부 트래픽은 backend:8000 직접 라우트
+# (commit 2 에서 8000 비공개화 후 BACKEND_DOMAIN 채우면 자동 활성).
+#
+# ⚠️ `.invalid` 같은 reserved TLD 를 fallback 으로 두면 Caddy 는 그것도 일반
+# 도메인으로 보고 ACME 발급 시도 → Let's Encrypt 가 즉시 거부 → 무한 retry +
+# rate limit 위험. localhost 가 유일하게 안전한 fallback.
+
+{$BACKEND_DOMAIN:localhost} {
+	# ─── reverse proxy ──
+	# backend 컨테이너의 8000 포트로. docker-compose 의 default 네트워크에서
+	# DNS 로 컨테이너명 `backend` 가 해소됨.
+	reverse_proxy backend:8000 {
+		# 백엔드까지의 hop timeout — CPS+PRD 가 동기 wait 모드에서 ~120s 걸릴 수
+		# 있으므로 보수적으로 305s (FE axios timeout 300s 와 정합).
+		transport http {
+			read_timeout 305s
+			write_timeout 305s
+			dial_timeout 5s
+		}
+
+		# 클라이언트 IP — Caddy 가 X-Forwarded-For / X-Forwarded-Proto 는 자동 전달.
+		# X-Real-IP 만 추가 (SlowAPI rate limit / 일부 nginx-호환 코드의 fallback).
+		header_up X-Real-IP {remote_host}
+	}
+
+	# ─── 보안 헤더 (edge 강제) ──
+	#
+	# FastAPI 의 CORS 와는 별개. 여기서는 응답 헤더 변경 — 백엔드 변경 없이
+	# 적용 가능. 일부는 백엔드도 보낼 수 있지만 edge 에서 보장.
+	header {
+		# clickjacking 차단
+		X-Frame-Options "DENY"
+		# MIME sniffing 차단
+		X-Content-Type-Options "nosniff"
+		# HTTPS-only 강제 (브라우저 캐싱). 도메인 안정화 후엔 max-age 더 길게.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# referrer 정책
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Caddy 시그니처 제거 (서버 식별 노출 최소화)
+		-Server
+	}
+
+	# ─── 로그 ──
+	# stdout 으로 → `docker compose logs caddy` 로 확인.
+	# 본문은 안 찍음 (privacy).
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}
+
+# ─── HTTP → HTTPS redirect ────────────────────────────────────────
+#
+# 도메인 무관하게 모든 HTTP 요청을 HTTPS 로 redirect.
+# Caddy 가 위 사이트 블록에서 자동으로 80 → 443 redirect 도 해주지만,
+# 명시적으로 두면 도메인 mismatch 트래픽도 일관 처리.
+
+:80 {
+	redir https://{host}{uri} permanent
+}

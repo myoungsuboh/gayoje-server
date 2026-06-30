@@ -1,0 +1,330 @@
+{
+  "spack": {
+    "apis": [
+      {
+        "id": "API-01", "name": "상품 등록", "method": "POST", "endpoint": "/api/v1/products",
+        "description": "셀러가 새 상품을 등록한다.",
+        "related_story_id": "Story-01.1",
+        "path_params": [],
+        "query_params": [],
+        "request_body": {
+          "content_type": "application/json",
+          "fields": [
+            {"name": "name",        "type": "string",  "required": true,  "constraint": "1~200자",        "description": "상품명"},
+            {"name": "price",       "type": "integer", "required": true,  "constraint": ">0 (원화)",       "description": "판매 가격"},
+            {"name": "stock",       "type": "integer", "required": true,  "constraint": ">=0",             "description": "재고"},
+            {"name": "description", "type": "string",  "required": false, "constraint": "10000자 이내",    "description": "상품 설명"}
+          ],
+          "example": "{\"name\": \"키보드\", \"price\": 89000, \"stock\": 50}"
+        },
+        "response_body": {
+          "status": 201, "content_type": "application/json",
+          "fields": [
+            {"name": "id",        "type": "uuid",     "required": true, "constraint": "", "description": "상품 ID"},
+            {"name": "createdAt", "type": "datetime", "required": true, "constraint": "", "description": "UTC"}
+          ],
+          "example": "{\"id\": \"...\", \"createdAt\": \"2026-05-26T...\"}"
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED",    "condition": "JWT 누락/만료",   "message": "인증이 필요합니다",   "lineage_quote": "Story-04.1"},
+          {"status": 403, "code": "ROLE_REQUIRED",    "condition": "seller 권한 없음", "message": "셀러 권한이 필요합니다", "lineage_quote": "Story-01.1"},
+          {"status": 422, "code": "VALIDATION_ERROR", "condition": "price<=0, stock<0", "message": "잘못된 입력값",      "lineage_quote": "Story-01.1"}
+        ],
+        "auth": {
+          "required": true, "required_roles": ["seller", "admin"],
+          "ownership_check": "self-as-seller",
+          "description": "셀러 또는 관리자만"
+        }
+      },
+      {
+        "id": "API-02", "name": "상품 목록 조회", "method": "GET", "endpoint": "/api/v1/products",
+        "description": "활성 상품 목록을 조회한다.",
+        "related_story_id": "Story-01.2",
+        "path_params": [],
+        "query_params": [
+          {"name": "page",     "type": "integer", "required": false, "constraint": ">=1",   "description": "페이지 (기본 1)"},
+          {"name": "pageSize", "type": "integer", "required": false, "constraint": "1~100", "description": "페이지 크기 (기본 20)"},
+          {"name": "q",        "type": "string",  "required": false, "constraint": "",       "description": "검색어 (상품명)"}
+        ],
+        "request_body": {"content_type": "", "fields": [], "example": ""},
+        "response_body": {
+          "status": 200, "content_type": "application/json",
+          "fields": [
+            {"name": "items", "type": "array",   "required": true, "constraint": "item: Product", "description": "상품 목록"},
+            {"name": "total", "type": "integer", "required": true, "constraint": "",               "description": "전체 개수"}
+          ],
+          "example": "{\"items\": [...], \"total\": 1024}"
+        },
+        "error_cases": [
+          {"status": 422, "code": "VALIDATION_ERROR", "condition": "pageSize 초과", "message": "잘못된 입력값", "lineage_quote": "Story-01.2"}
+        ],
+        "auth": {
+          "required": false, "required_roles": [],
+          "ownership_check": "",
+          "description": "비로그인 가능 (공개 카탈로그)"
+        }
+      },
+      {
+        "id": "API-03", "name": "주문 생성", "method": "POST", "endpoint": "/api/v1/orders",
+        "description": "구매자가 주문을 생성한다. Order + OrderItem N건 atomic.",
+        "related_story_id": "Story-02.1",
+        "path_params": [],
+        "query_params": [],
+        "request_body": {
+          "content_type": "application/json",
+          "fields": [
+            {"name": "items", "type": "array", "required": true, "constraint": "최소 1개, item: {productId, quantity}", "description": "주문 항목"}
+          ],
+          "example": "{\"items\": [{\"productId\": \"...\", \"quantity\": 2}]}"
+        },
+        "response_body": {
+          "status": 201, "content_type": "application/json",
+          "fields": [
+            {"name": "id",          "type": "uuid",     "required": true, "constraint": "",                "description": "주문 ID"},
+            {"name": "status",      "type": "enum",     "required": true, "constraint": "CREATED",          "description": "초기 상태"},
+            {"name": "totalAmount", "type": "integer",  "required": true, "constraint": ">0",              "description": "총 금액 (원)"},
+            {"name": "createdAt",   "type": "datetime", "required": true, "constraint": "",                "description": "UTC"}
+          ],
+          "example": "{\"id\": \"...\", \"status\": \"CREATED\", \"totalAmount\": 178000}"
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED",    "condition": "JWT 누락/만료",          "message": "인증이 필요합니다",         "lineage_quote": "Story-04.1"},
+          {"status": 404, "code": "PRODUCT_NOT_FOUND","condition": "productId 미존재",        "message": "상품을 찾을 수 없습니다",   "lineage_quote": "Story-02.1"},
+          {"status": 422, "code": "VALIDATION_ERROR", "condition": "stock 부족 / items 빈 배열", "message": "재고가 부족하거나 잘못된 입력입니다", "lineage_quote": "Story-02.1"}
+        ],
+        "auth": {
+          "required": true, "required_roles": ["buyer", "admin"],
+          "ownership_check": "self-as-buyer",
+          "description": "인증된 구매자"
+        }
+      },
+      {
+        "id": "API-04", "name": "결제 요청", "method": "POST", "endpoint": "/api/v1/payments",
+        "description": "주문에 대한 결제. Order.status: CREATED → PAID 전이.",
+        "related_story_id": "Story-03.1",
+        "path_params": [],
+        "query_params": [],
+        "request_body": {
+          "content_type": "application/json",
+          "fields": [
+            {"name": "orderId",       "type": "uuid", "required": true, "constraint": "Order.status=CREATED 이어야 함",  "description": "주문 ID"},
+            {"name": "paymentMethod", "type": "enum", "required": true, "constraint": "enum: CARD|BANK|VIRTUAL_ACCOUNT", "description": "결제 수단"}
+          ],
+          "example": "{\"orderId\": \"...\", \"paymentMethod\": \"CARD\"}"
+        },
+        "response_body": {
+          "status": 201, "content_type": "application/json",
+          "fields": [
+            {"name": "id",     "type": "uuid",     "required": true, "constraint": "", "description": "결제 ID"},
+            {"name": "status", "type": "enum",     "required": true, "constraint": "PAID|FAILED", "description": "결제 결과"},
+            {"name": "paidAt", "type": "datetime", "required": false, "constraint": "status=PAID 시만", "description": "UTC"}
+          ],
+          "example": "{\"id\": \"...\", \"status\": \"PAID\", \"paidAt\": \"2026-05-26T...\"}"
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED",   "condition": "JWT 누락/만료",          "message": "인증이 필요합니다",       "lineage_quote": "Story-04.1"},
+          {"status": 403, "code": "FORBIDDEN_OWNER", "condition": "본인 주문 아님",          "message": "권한이 없습니다",         "lineage_quote": "Story-03.1"},
+          {"status": 404, "code": "ORDER_NOT_FOUND", "condition": "orderId 미존재",         "message": "주문을 찾을 수 없습니다", "lineage_quote": "Story-03.1"},
+          {"status": 409, "code": "STATE_CONFLICT",  "condition": "이미 PAID 또는 CANCELED", "message": "결제할 수 없는 상태입니다", "lineage_quote": "Story-03.1"},
+          {"status": 422, "code": "VALIDATION_ERROR","condition": "paymentMethod enum 외",   "message": "잘못된 결제 수단입니다",   "lineage_quote": "Story-03.1"}
+        ],
+        "auth": {
+          "required": true, "required_roles": ["buyer"],
+          "ownership_check": "Order.buyerId == requester.userId",
+          "description": "본인 주문에만 결제 가능"
+        }
+      },
+      {
+        "id": "API-05", "name": "환불 요청", "method": "POST", "endpoint": "/api/v1/payments/{paymentId}/refund",
+        "description": "결제 후 7일 이내 전액 환불.",
+        "related_story_id": "Story-03.2",
+        "path_params": [
+          {"name": "paymentId", "type": "uuid", "required": true, "constraint": "", "description": "결제 ID"}
+        ],
+        "query_params": [],
+        "request_body": {"content_type": "", "fields": [], "example": ""},
+        "response_body": {
+          "status": 200, "content_type": "application/json",
+          "fields": [
+            {"name": "id",         "type": "uuid",     "required": true, "constraint": "",            "description": "결제 ID"},
+            {"name": "status",     "type": "enum",     "required": true, "constraint": "REFUNDED",     "description": "환불 후 상태"},
+            {"name": "refundedAt", "type": "datetime", "required": true, "constraint": "",            "description": "UTC"}
+          ],
+          "example": "{\"id\": \"...\", \"status\": \"REFUNDED\"}"
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED",     "condition": "JWT 누락/만료",          "message": "인증이 필요합니다",         "lineage_quote": "Story-04.1"},
+          {"status": 403, "code": "FORBIDDEN_OWNER",   "condition": "본인 결제 아님",          "message": "권한이 없습니다",           "lineage_quote": "Story-03.2"},
+          {"status": 404, "code": "PAYMENT_NOT_FOUND", "condition": "paymentId 미존재",        "message": "결제를 찾을 수 없습니다",   "lineage_quote": "Story-03.2"},
+          {"status": 409, "code": "STATE_CONFLICT",    "condition": "이미 REFUNDED 또는 미PAID", "message": "환불할 수 없는 상태입니다", "lineage_quote": "Story-03.2"},
+          {"status": 422, "code": "REFUND_EXPIRED",    "condition": "결제 후 7일 초과",        "message": "환불 기한이 지났습니다",   "lineage_quote": "Story-03.2"}
+        ],
+        "auth": {
+          "required": true, "required_roles": ["buyer"],
+          "ownership_check": "Payment.order.buyerId == requester.userId",
+          "description": "본인 결제만 환불 요청"
+        }
+      }
+    ],
+    "entities": [
+      {
+        "id": "ENT-01", "name": "Product",
+        "attributes": [
+          {"name": "id",          "type": "uuid",     "required": true,  "constraint": "PK"},
+          {"name": "sellerId",    "type": "uuid",     "required": true,  "constraint": "FK -> User.id"},
+          {"name": "name",        "type": "string",   "required": true,  "constraint": "1~200자"},
+          {"name": "price",       "type": "integer",  "required": true,  "constraint": ">0 (원화)"},
+          {"name": "stock",       "type": "integer",  "required": true,  "constraint": ">=0"},
+          {"name": "status",      "type": "enum",     "required": true,  "constraint": "ACTIVE|INACTIVE|DELETED, 기본 ACTIVE"},
+          {"name": "description", "type": "string",   "required": false, "constraint": "10000자 이내"},
+          {"name": "createdAt",   "type": "datetime", "required": true,  "constraint": "UTC"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [
+          {"story_id": "Story-01.1", "quote": "상품 등록"},
+          {"story_id": "Story-01.2", "quote": "상품 조회"}
+        ]}
+      },
+      {
+        "id": "ENT-02", "name": "Order",
+        "attributes": [
+          {"name": "id",          "type": "uuid",     "required": true, "constraint": "PK"},
+          {"name": "buyerId",     "type": "uuid",     "required": true, "constraint": "FK -> User.id"},
+          {"name": "status",      "type": "enum",     "required": true, "constraint": "CREATED|PAID|SHIPPED|DELIVERED|CANCELED|REFUNDED"},
+          {"name": "totalAmount", "type": "integer",  "required": true, "constraint": ">0 (원화)"},
+          {"name": "createdAt",   "type": "datetime", "required": true, "constraint": "UTC"},
+          {"name": "updatedAt",   "type": "datetime", "required": true, "constraint": "UTC"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [
+          {"story_id": "Story-02.1", "quote": "주문 생성"},
+          {"story_id": "Story-02.3", "quote": "주문 취소"}
+        ]}
+      },
+      {
+        "id": "ENT-03", "name": "OrderItem",
+        "attributes": [
+          {"name": "id",        "type": "uuid",    "required": true, "constraint": "PK"},
+          {"name": "orderId",   "type": "uuid",    "required": true, "constraint": "FK -> Order.id, CASCADE"},
+          {"name": "productId", "type": "uuid",    "required": true, "constraint": "FK -> Product.id"},
+          {"name": "quantity",  "type": "integer", "required": true, "constraint": ">0"},
+          {"name": "unitPrice", "type": "integer", "required": true, "constraint": "주문 시점 Product.price snapshot"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [
+          {"story_id": "Story-02.1", "quote": "주문 항목"}
+        ]}
+      },
+      {
+        "id": "ENT-04", "name": "Payment",
+        "attributes": [
+          {"name": "id",            "type": "uuid",     "required": true,  "constraint": "PK"},
+          {"name": "orderId",       "type": "uuid",     "required": true,  "constraint": "FK -> Order.id, UNIQUE"},
+          {"name": "amount",        "type": "integer",  "required": true,  "constraint": "Order.totalAmount snapshot"},
+          {"name": "paymentMethod", "type": "enum",     "required": true,  "constraint": "CARD|BANK|VIRTUAL_ACCOUNT"},
+          {"name": "status",        "type": "enum",     "required": true,  "constraint": "PENDING|PAID|FAILED|REFUNDED"},
+          {"name": "paidAt",        "type": "datetime", "required": false, "constraint": "status=PAID 시만"},
+          {"name": "refundedAt",    "type": "datetime", "required": false, "constraint": "status=REFUNDED 시만"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [
+          {"story_id": "Story-03.1", "quote": "결제"},
+          {"story_id": "Story-03.2", "quote": "환불"}
+        ]}
+      },
+      {
+        "id": "ENT-05", "name": "User",
+        "attributes": [
+          {"name": "id",           "type": "uuid",     "required": true, "constraint": "PK"},
+          {"name": "email",        "type": "string",   "required": true, "constraint": "UNIQUE, 유효 이메일"},
+          {"name": "passwordHash", "type": "string",   "required": true, "constraint": "Argon2"},
+          {"name": "role",         "type": "enum",     "required": true, "constraint": "seller|buyer|admin"},
+          {"name": "createdAt",    "type": "datetime", "required": true, "constraint": "UTC"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [
+          {"story_id": "Story-04.1", "quote": "사용자 계정"}
+        ]}
+      }
+    ],
+    "policies": [
+      {"id": "POL-01", "category": "Availability", "description": "가동률 99.9% 이상 (NFR-01)"},
+      {"id": "POL-02", "category": "Performance",  "description": "API 응답 95th percentile 500ms 이내 (NFR-03)"},
+      {"id": "POL-03", "category": "Business",     "description": "환불 가능 기한: 결제 후 7일"},
+      {"id": "POL-04", "category": "Consistency",  "description": "주문 생성은 atomic — 부분 저장 금지 (NFR-05)"},
+      {"id": "POL-05", "category": "Security",     "description": "결제 정보 PCI-DSS 준수 (NFR-06)"},
+      {"id": "POL-06", "category": "Security",     "description": "OAuth 2.0 + HTTPS (NFR-07)"}
+    ]
+  },
+  "ddd": {
+    "contexts": [
+      {"id": "CTX-01", "name": "Catalog"},
+      {"id": "CTX-02", "name": "Sales"},
+      {"id": "CTX-03", "name": "Identity"}
+    ],
+    "aggregates": [
+      {"id": "AGG-01", "name": "Product", "context_id": "CTX-01",
+       "lineage": {"confidence": "direct", "related_stories": [
+         {"story_id": "Story-01.1", "quote": "상품 등록"}
+       ]},
+       "invariants": [
+         "price > 0 (원화 정수)",
+         "stock >= 0 (음수 금지)",
+         "status in {ACTIVE, INACTIVE, DELETED}",
+         "sellerId 는 등록 시 1회 set 후 불변"
+       ]},
+      {"id": "AGG-02", "name": "Order", "context_id": "CTX-02",
+       "lineage": {"confidence": "direct", "related_stories": [
+         {"story_id": "Story-02.1", "quote": "주문 생성"},
+         {"story_id": "Story-03.1", "quote": "결제"}
+       ]},
+       "invariants": [
+         "status 전이: CREATED → PAID → SHIPPED → DELIVERED 또는 CREATED → CANCELED 또는 PAID → REFUNDED",
+         "totalAmount = sum(OrderItem.quantity * unitPrice)",
+         "OrderItem 최소 1개 필수 (빈 주문 금지)",
+         "이미 PAID 인 Order 는 CANCELED 전이 금지 (환불로만 처리)"
+       ]},
+      {"id": "AGG-03", "name": "User", "context_id": "CTX-03",
+       "lineage": {"confidence": "direct", "related_stories": [
+         {"story_id": "Story-04.1", "quote": "사용자 계정"}
+       ]},
+       "invariants": [
+         "email 형식 검증 + UNIQUE",
+         "passwordHash 는 Argon2 (평문 저장 금지)",
+         "role in {seller, buyer, admin}"
+       ]}
+    ]
+  },
+  "arch": {
+    "services": [
+      {"id": "SVC-01", "name": "쇼핑 서비스", "type": "Backend API", "tech_stack": "FastAPI",
+       "deployment": {
+         "port": 8000, "replicas": 4,
+         "health_check_path": "/health",
+         "env_vars": ["DATABASE_URL", "REDIS_URL", "JWT_SECRET", "PG_GATEWAY_URL"],
+         "scaling_policy": "auto-cpu"
+       },
+       "external_dependencies": [
+         {"name": "PG 결제 게이트웨이", "type": "HTTP/REST", "purpose": "카드 결제 위임"}
+       ]},
+      {"id": "SVC-02", "name": "인증 서비스", "type": "Backend API", "tech_stack": "FastAPI",
+       "deployment": {
+         "port": 8001, "replicas": 2,
+         "health_check_path": "/health",
+         "env_vars": ["DATABASE_URL", "JWT_SECRET"],
+         "scaling_policy": "manual"
+       },
+       "external_dependencies": []},
+      {"id": "SVC-03", "name": "쇼핑 프론트엔드", "type": "Frontend", "tech_stack": "Next.js",
+       "deployment": {"port": 0, "replicas": 1, "health_check_path": "", "env_vars": [], "scaling_policy": "manual"},
+       "external_dependencies": []}
+    ],
+    "databases": [
+      {"id": "DB-01", "name": "주 데이터베이스", "type": "Relational Database", "tech_stack": "PostgreSQL"},
+      {"id": "DB-02", "name": "캐시/세션",        "type": "In-Memory",           "tech_stack": "Redis"}
+    ],
+    "connections": [
+      {"source_id": "SVC-03", "target_id": "SVC-01", "protocol": "HTTPS/REST", "description": "쇼핑 API",     "auth": "bearer"},
+      {"source_id": "SVC-03", "target_id": "SVC-02", "protocol": "HTTPS/REST", "description": "인증 API",      "auth": "bearer"},
+      {"source_id": "SVC-01", "target_id": "DB-01",  "protocol": "SQL/TCP",    "description": "쇼핑 데이터",   "auth": "basic"},
+      {"source_id": "SVC-01", "target_id": "DB-02",  "protocol": "Redis Wire", "description": "캐시/세션",     "auth": "basic"},
+      {"source_id": "SVC-02", "target_id": "DB-01",  "protocol": "SQL/TCP",    "description": "사용자 데이터", "auth": "basic"}
+    ]
+  },
+  "validation_report": {"total_errors": 0, "total_warnings": 2, "total_infos": 9}
+}

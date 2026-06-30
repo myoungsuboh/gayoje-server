@@ -1,0 +1,9 @@
+-r requirements.txt
+
+pytest==8.3.4
+pytest-asyncio==0.24.0
+
+# [2026-05] testcontainers — RUN_TESTCONTAINERS=1 로 실제 Neo4j 컨테이너 띄워
+# cypher 시맨틱 (FOREACH + duration / OPTIONAL MATCH 정합 등) 검증. CI 환경에
+# Docker 데몬 있어야 동작. 기본은 skip — fake-driven 테스트 우선.
+testcontainers[neo4j]>=4.0; python_version >= "3.9"

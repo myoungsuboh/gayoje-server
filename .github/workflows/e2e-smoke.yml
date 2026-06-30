@@ -1,0 +1,72 @@
+# E2E 스모크 — 실서버에 "사용자 한 사이클"(회의록→CPS→PRD→누적→Design→조회→정리)을 돌려
+# 무음 실패(빈 PRD / error 강등 / frozen 누적 / 조회 깨짐)를 매일 밤 자동 감지 (P0-2).
+#
+# 배경: 단위 3,096개 그린 + 운영 PRD 빈 사고(2026-06). 단위로는 LLM·Cypher·배치 체인의
+# 무음 실패를 못 잡는다 — 이 워크플로우가 그 구조적 안전망.
+#
+# 필요 secrets (Settings → Secrets and variables → Actions):
+#   SMOKE_BASE_URL  — 예: https://api.example.com (공개 접근 가능해야 함)
+#   SMOKE_EMAIL     — 스모크 전용 계정 (⚠ Pro 등급: 야간 1회 × 30일 ≈ 토큰 2.1M/월·미팅 60건
+#                     → Free(미팅 5건) 불가. 운영 계정 재사용 금지 — 전용 계정 권장)
+#   SMOKE_PASSWORD
+#
+# secrets 미등록 동안에는 경고만 남기고 통과(skip) — 등록 즉시 활성화.
+# 실패 시 GitHub 기본 알림(워크플로우 실패 메일)이 발송된다.
+
+name: E2E Smoke (real server)
+
+on:
+  schedule:
+    - cron: '0 19 * * *'   # UTC 19:00 = KST 04:00 (트래픽 최저 시간대)
+  workflow_dispatch:
+    inputs:
+      skip_design:
+        description: 'Design(createSpack) 단계 생략'
+        type: boolean
+        default: false
+
+# 동시 실행 1개 — 야간 cron 과 수동 dispatch 가 겹쳐 같은 계정 쿼터를 이중 소모하지 않게.
+concurrency:
+  group: e2e-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50   # postMeeting ×2(각 ≤15분) + design(≤15분) + 여유
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: secrets 등록 여부 확인 (미등록이면 조용히 skip)
+        id: guard
+        env:
+          SMOKE_BASE_URL: ${{ secrets.SMOKE_BASE_URL }}
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+        run: |
+          if [ -z "$SMOKE_BASE_URL" ] || [ -z "$SMOKE_EMAIL" ]; then
+            echo "::warning::SMOKE_BASE_URL / SMOKE_EMAIL / SMOKE_PASSWORD secrets 미등록 — 스모크 skip. 등록하면 다음 실행부터 활성화됩니다."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.guard.outputs.ready == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install deps (httpx only)
+        if: steps.guard.outputs.ready == 'true'
+        run: pip install httpx
+
+      - name: Run E2E smoke
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          SMOKE_BASE_URL: ${{ secrets.SMOKE_BASE_URL }}
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.skip_design }}" = "true" ]; then ARGS="--skip-design"; fi
+          python scripts/e2e_smoke.py $ARGS

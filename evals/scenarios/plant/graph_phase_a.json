@@ -1,0 +1,347 @@
+{
+  "spack": {
+    "apis": [
+      {
+        "id": "API-01",
+        "name": "식물 생장 데이터 조회",
+        "method": "GET",
+        "endpoint": "/api/v1/plants/{plantId}/growth-data",
+        "description": "특정 식물의 생장 데이터를 조회한다.",
+        "related_story_id": "Story-03.1",
+        "path_params": [
+          {"name": "plantId", "type": "uuid", "required": true, "constraint": "", "description": "식물 식별자"}
+        ],
+        "query_params": [
+          {"name": "from", "type": "datetime", "required": false, "constraint": "", "description": "조회 시작 시점 (UTC)"},
+          {"name": "to",   "type": "datetime", "required": false, "constraint": "", "description": "조회 종료 시점 (UTC)"}
+        ],
+        "request_body": {"content_type": "", "fields": [], "example": ""},
+        "response_body": {
+          "status": 200, "content_type": "application/json",
+          "fields": [
+            {"name": "items", "type": "array", "required": true, "constraint": "item: PlantGrowthData", "description": "생장 데이터 목록"}
+          ],
+          "example": "{\"items\": [...]}"
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED",     "condition": "JWT 누락/만료",       "message": "인증이 필요합니다",       "lineage_quote": ""},
+          {"status": 403, "code": "FORBIDDEN_OWNER",   "condition": "본인 소유 아닌 식물", "message": "권한이 없습니다",         "lineage_quote": ""},
+          {"status": 404, "code": "PLANT_NOT_FOUND",   "condition": "plantId 미존재",       "message": "식물을 찾을 수 없습니다", "lineage_quote": ""}
+        ],
+        "auth": {
+          "required": true, "required_roles": ["owner", "admin"],
+          "ownership_check": "Plant.ownerId == requester.userId",
+          "description": "본인 식물 또는 관리자"
+        }
+      },
+      {
+        "id": "API-02",
+        "name": "식물 생장 데이터 기록",
+        "method": "POST",
+        "endpoint": "/api/v1/plants/{plantId}/growth-data",
+        "description": "특정 식물의 생장 데이터를 기록한다.",
+        "related_story_id": "Story-03.2",
+        "path_params": [
+          {"name": "plantId", "type": "uuid", "required": true, "constraint": "", "description": "식물 식별자"}
+        ],
+        "query_params": [],
+        "request_body": {
+          "content_type": "application/json",
+          "fields": [
+            {"name": "height",       "type": "double",  "required": true,  "constraint": ">0",     "description": "키 (cm)"},
+            {"name": "leafCount",    "type": "integer", "required": true,  "constraint": ">=0",    "description": "잎 개수"},
+            {"name": "healthStatus", "type": "enum",    "required": false, "constraint": "enum: HEALTHY|WARNING|DEAD", "description": "건강 상태"}
+          ],
+          "example": "{\"height\": 12.5, \"leafCount\": 8, \"healthStatus\": \"HEALTHY\"}"
+        },
+        "response_body": {
+          "status": 201, "content_type": "application/json",
+          "fields": [
+            {"name": "id",         "type": "uuid",     "required": true, "constraint": "", "description": "생성된 기록 ID"},
+            {"name": "recordedAt", "type": "datetime", "required": true, "constraint": "", "description": "기록 시각 (UTC)"}
+          ],
+          "example": "{\"id\": \"...\", \"recordedAt\": \"2026-05-25T...\"}"
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED",     "condition": "JWT 누락/만료", "message": "인증이 필요합니다",       "lineage_quote": ""},
+          {"status": 403, "code": "FORBIDDEN_OWNER",   "condition": "본인 식물 아님", "message": "권한이 없습니다",         "lineage_quote": ""},
+          {"status": 404, "code": "PLANT_NOT_FOUND",   "condition": "plantId 미존재", "message": "식물을 찾을 수 없습니다", "lineage_quote": ""},
+          {"status": 422, "code": "VALIDATION_ERROR",  "condition": "height/leafCount 음수", "message": "잘못된 입력값", "lineage_quote": ""}
+        ],
+        "auth": {
+          "required": true, "required_roles": ["owner"],
+          "ownership_check": "Plant.ownerId == requester.userId",
+          "description": "본인 식물에만 기록 가능"
+        }
+      },
+      {
+        "id": "API-03",
+        "name": "식물 자동 환경 제어 설정 조회",
+        "method": "GET",
+        "endpoint": "/api/v1/plants/{plantId}/environment-control-settings",
+        "description": "특정 식물의 자동 환경 제어 설정을 조회한다.",
+        "related_story_id": "Story-04.1",
+        "path_params": [
+          {"name": "plantId", "type": "uuid", "required": true, "constraint": "", "description": "식물 식별자"}
+        ],
+        "query_params": [],
+        "request_body": {"content_type": "", "fields": [], "example": ""},
+        "response_body": {
+          "status": 200, "content_type": "application/json",
+          "fields": [
+            {"name": "temperatureMin",  "type": "double",  "required": true, "constraint": "", "description": "최저 온도 (℃)"},
+            {"name": "temperatureMax",  "type": "double",  "required": true, "constraint": "", "description": "최고 온도 (℃)"},
+            {"name": "humidityMin",     "type": "integer", "required": true, "constraint": "0~100", "description": "최저 습도 (%)"},
+            {"name": "humidityMax",     "type": "integer", "required": true, "constraint": "0~100", "description": "최고 습도 (%)"}
+          ],
+          "example": ""
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED", "condition": "", "message": "", "lineage_quote": ""},
+          {"status": 404, "code": "SETTING_NOT_FOUND", "condition": "설정 미존재", "message": "설정이 없습니다", "lineage_quote": ""}
+        ],
+        "auth": {"required": true, "required_roles": ["owner"], "ownership_check": "Plant.ownerId == requester.userId", "description": "본인 식물"}
+      },
+      {
+        "id": "API-04",
+        "name": "식물 자동 환경 제어 설정 생성",
+        "method": "POST",
+        "endpoint": "/api/v1/plants/{plantId}/environment-control-settings",
+        "description": "특정 식물의 자동 환경 제어 설정을 생성한다.",
+        "related_story_id": "Story-04.2",
+        "path_params": [
+          {"name": "plantId", "type": "uuid", "required": true, "constraint": "", "description": "식물 식별자"}
+        ],
+        "query_params": [],
+        "request_body": {
+          "content_type": "application/json",
+          "fields": [
+            {"name": "temperatureMin", "type": "double",  "required": true, "constraint": "", "description": "최저 온도 (℃)"},
+            {"name": "temperatureMax", "type": "double",  "required": true, "constraint": "", "description": "최고 온도 (℃)"},
+            {"name": "humidityMin",    "type": "integer", "required": true, "constraint": "0~100", "description": "최저 습도 (%)"},
+            {"name": "humidityMax",    "type": "integer", "required": true, "constraint": "0~100", "description": "최고 습도 (%)"}
+          ],
+          "example": ""
+        },
+        "response_body": {
+          "status": 201, "content_type": "application/json",
+          "fields": [{"name": "id", "type": "uuid", "required": true, "constraint": "", "description": ""}],
+          "example": ""
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED", "condition": "", "message": "", "lineage_quote": ""},
+          {"status": 404, "code": "PLANT_NOT_FOUND", "condition": "", "message": "", "lineage_quote": ""},
+          {"status": 422, "code": "VALIDATION_ERROR", "condition": "범위 역전 (min > max)", "message": "온도/습도 범위 잘못됨", "lineage_quote": ""}
+        ],
+        "auth": {"required": true, "required_roles": ["owner"], "ownership_check": "Plant.ownerId == requester.userId", "description": "본인 식물만"}
+      },
+      {
+        "id": "API-05",
+        "name": "식물 자동 환경 제어 설정 변경",
+        "method": "PUT",
+        "endpoint": "/api/v1/plants/{plantId}/environment-control-settings",
+        "description": "특정 식물의 자동 환경 제어 설정을 변경한다.",
+        "related_story_id": "Story-04.3",
+        "path_params": [
+          {"name": "plantId", "type": "uuid", "required": true, "constraint": "", "description": "식물 식별자"}
+        ],
+        "query_params": [],
+        "request_body": {
+          "content_type": "application/json",
+          "fields": [
+            {"name": "temperatureMin", "type": "double",  "required": false, "constraint": "", "description": "최저 온도 (℃)"},
+            {"name": "temperatureMax", "type": "double",  "required": false, "constraint": "", "description": "최고 온도 (℃)"},
+            {"name": "humidityMin",    "type": "integer", "required": false, "constraint": "0~100", "description": ""},
+            {"name": "humidityMax",    "type": "integer", "required": false, "constraint": "0~100", "description": ""}
+          ],
+          "example": ""
+        },
+        "response_body": {
+          "status": 200, "content_type": "application/json",
+          "fields": [{"name": "updatedAt", "type": "datetime", "required": true, "constraint": "", "description": "변경 시각"}],
+          "example": ""
+        },
+        "error_cases": [
+          {"status": 401, "code": "AUTH_REQUIRED", "condition": "", "message": "", "lineage_quote": ""},
+          {"status": 404, "code": "SETTING_NOT_FOUND", "condition": "", "message": "", "lineage_quote": ""},
+          {"status": 422, "code": "VALIDATION_ERROR", "condition": "범위 역전", "message": "", "lineage_quote": ""}
+        ],
+        "auth": {"required": true, "required_roles": ["owner"], "ownership_check": "Plant.ownerId == requester.userId", "description": "본인 식물만"}
+      }
+    ],
+    "entities": [
+      {
+        "id": "ENT-01", "name": "EnvironmentControlSetting",
+        "attributes": [
+          {"name": "id",             "type": "uuid",     "required": true,  "constraint": "",      "description": "설정 식별자"},
+          {"name": "plantId",        "type": "uuid",     "required": true,  "constraint": "",      "description": "식물 식별자"},
+          {"name": "temperatureMin", "type": "double",   "required": true,  "constraint": "",      "description": "최저 온도 (℃)"},
+          {"name": "temperatureMax", "type": "double",   "required": true,  "constraint": "",      "description": "최고 온도 (℃)"},
+          {"name": "humidityMin",    "type": "integer",  "required": true,  "constraint": "0~100", "description": "최저 습도 (%)"},
+          {"name": "humidityMax",    "type": "integer",  "required": true,  "constraint": "0~100", "description": "최고 습도 (%)"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-04.1", "quote": "자동 환경 제어 설정"}]}
+      },
+      {
+        "id": "ENT-02", "name": "EnvironmentData",
+        "attributes": [
+          {"name": "id",          "type": "uuid",     "required": true, "constraint": "", "description": ""},
+          {"name": "plantId",     "type": "uuid",     "required": true, "constraint": "", "description": ""},
+          {"name": "temperature", "type": "double",   "required": true, "constraint": "", "description": "℃"},
+          {"name": "humidity",    "type": "integer",  "required": true, "constraint": "0~100", "description": "%"},
+          {"name": "lightLevel",  "type": "integer",  "required": false, "constraint": "", "description": "조도 (lux)"},
+          {"name": "measuredAt",  "type": "datetime", "required": true, "constraint": "", "description": "측정 시각"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-02.1", "quote": "환경 데이터 모니터링"}]}
+      },
+      {
+        "id": "ENT-03", "name": "Plant",
+        "attributes": [
+          {"name": "id",          "type": "uuid",     "required": true, "constraint": "", "description": ""},
+          {"name": "ownerId",     "type": "uuid",     "required": true, "constraint": "", "description": "소유 사용자"},
+          {"name": "name",        "type": "string",   "required": true, "constraint": "len<=100", "description": "식물 이름"},
+          {"name": "species",     "type": "string",   "required": false, "constraint": "", "description": "종"},
+          {"name": "plantedAt",   "type": "date",     "required": false, "constraint": "", "description": "심은 날짜"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-01.1", "quote": "식물 정보 등록"}]}
+      },
+      {
+        "id": "ENT-04", "name": "PlantGrowthData",
+        "attributes": [
+          {"name": "id",           "type": "uuid",     "required": true, "constraint": "", "description": ""},
+          {"name": "plantId",      "type": "uuid",     "required": true, "constraint": "", "description": ""},
+          {"name": "height",       "type": "double",   "required": true, "constraint": ">0",  "description": "키 (cm)"},
+          {"name": "leafCount",    "type": "integer",  "required": true, "constraint": ">=0", "description": "잎 개수"},
+          {"name": "healthStatus", "type": "enum",     "required": false, "constraint": "enum: HEALTHY|WARNING|DEAD", "description": ""},
+          {"name": "recordedAt",   "type": "datetime", "required": true, "constraint": "", "description": "기록 시각"}
+        ],
+        "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-03.1", "quote": "생장 데이터 기록"}]}
+      },
+      {
+        "id": "ENT-05", "name": "User",
+        "attributes": [
+          {"name": "id",           "type": "uuid",     "required": true, "constraint": "", "description": ""},
+          {"name": "email",        "type": "string",   "required": true, "constraint": "regex: ^.+@.+$", "description": ""},
+          {"name": "role",         "type": "enum",     "required": true, "constraint": "enum: owner|admin", "description": ""},
+          {"name": "passwordHash", "type": "string",   "required": true, "constraint": "", "description": "Argon2 해시"},
+          {"name": "createdAt",    "type": "datetime", "required": true, "constraint": "", "description": ""}
+        ],
+        "lineage": {"confidence": "inferred", "related_stories": [{"story_id": "Story-05.1", "quote": "사용자 권한 관리"}]}
+      }
+    ],
+    "policies": [
+      {"id": "POL-01", "category": "Performance", "description": "API 응답 시간 500ms 이내"},
+      {"id": "POL-02", "category": "Security",    "description": "OAuth 2.0 + HTTPS"}
+    ]
+  },
+  "ddd": {
+    "contexts":   [{"id": "CTX-01", "name": "PlantManagement"}, {"id": "CTX-02", "name": "User"}],
+    "aggregates": [
+      {"id": "AGG-01", "name": "Plant", "context_id": "CTX-01",
+       "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-01.1", "quote": "식물 정보"}]},
+       "invariants": [
+         "ownerId 는 등록 시 1회만 설정 (이후 변경 불가)",
+         "PlantGrowthData.height > 0 (cm)",
+         "PlantGrowthData.leafCount >= 0",
+         "EnvironmentControlSetting: temperatureMin < temperatureMax",
+         "EnvironmentControlSetting: humidityMin < humidityMax (0~100)"
+       ]},
+      {"id": "AGG-02", "name": "User", "context_id": "CTX-02",
+       "lineage": {"confidence": "inferred", "related_stories": [{"story_id": "Story-05.1", "quote": "사용자"}]},
+       "invariants": [
+         "email 형식 검증 (regex)",
+         "passwordHash 는 Argon2 해시 (평문 저장 금지)",
+         "role in {owner, admin}"
+       ]}
+    ],
+    "domain_entities": [
+      {"id": "DENT-01", "name": "PlantGrowthData", "aggregate_id": "AGG-01",
+       "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-03.1", "quote": "생장 기록"}]},
+       "attributes": [
+         {"name": "id",          "type": "uuid",     "required": true,  "constraint": "",     "description": ""},
+         {"name": "height",      "type": "double",   "required": true,  "constraint": ">0",   "description": "cm"},
+         {"name": "leafCount",   "type": "integer",  "required": true,  "constraint": ">=0",  "description": ""},
+         {"name": "healthStatus","type": "enum",     "required": false, "constraint": "enum: HEALTHY|WARNING|DEAD", "description": ""},
+         {"name": "recordedAt",  "type": "datetime", "required": true,  "constraint": "",     "description": "UTC"}
+       ]},
+      {"id": "DENT-02", "name": "EnvironmentData", "aggregate_id": "AGG-01",
+       "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-02.1", "quote": "환경 데이터"}]},
+       "attributes": [
+         {"name": "id",          "type": "uuid",     "required": true,  "constraint": "",     "description": ""},
+         {"name": "temperature", "type": "double",   "required": true,  "constraint": "",     "description": "℃"},
+         {"name": "humidity",    "type": "integer",  "required": true,  "constraint": "0~100","description": "%"},
+         {"name": "lightLevel",  "type": "integer",  "required": false, "constraint": "",     "description": "lux"},
+         {"name": "measuredAt",  "type": "datetime", "required": true,  "constraint": "",     "description": "UTC"}
+       ]},
+      {"id": "DENT-03", "name": "EnvironmentControlSetting", "aggregate_id": "AGG-01",
+       "lineage": {"confidence": "direct", "related_stories": [{"story_id": "Story-04.1", "quote": "환경 제어"}]},
+       "attributes": [
+         {"name": "id",             "type": "uuid",    "required": true, "constraint": "",     "description": ""},
+         {"name": "temperatureMin", "type": "double",  "required": true, "constraint": "",     "description": "℃"},
+         {"name": "temperatureMax", "type": "double",  "required": true, "constraint": "",     "description": "℃"},
+         {"name": "humidityMin",    "type": "integer", "required": true, "constraint": "0~100","description": "%"},
+         {"name": "humidityMax",    "type": "integer", "required": true, "constraint": "0~100","description": "%"}
+       ]}
+    ],
+    "domain_events": [
+      {"id": "EVT-01", "name": "PlantGrowthDataRecorded",
+       "description": "식물 생장 데이터가 기록되었음",
+       "related_story_id": "Story-03.2",
+       "published_by_aggregate_id": "AGG-01",
+       "payload_fields": [
+         {"name": "growthDataId", "type": "uuid",     "required": true, "constraint": "", "description": ""},
+         {"name": "plantId",      "type": "uuid",     "required": true, "constraint": "", "description": ""},
+         {"name": "height",       "type": "double",   "required": true, "constraint": "", "description": "cm"},
+         {"name": "leafCount",    "type": "integer",  "required": true, "constraint": "", "description": ""},
+         {"name": "occurredAt",   "type": "datetime", "required": true, "constraint": "", "description": "UTC"}
+       ]},
+      {"id": "EVT-02", "name": "EnvironmentControlSettingUpdated",
+       "description": "환경 제어 설정이 변경됨",
+       "related_story_id": "Story-04.3",
+       "published_by_aggregate_id": "AGG-01",
+       "payload_fields": [
+         {"name": "settingId",  "type": "uuid",     "required": true, "constraint": "", "description": ""},
+         {"name": "plantId",    "type": "uuid",     "required": true, "constraint": "", "description": ""},
+         {"name": "updatedBy",  "type": "uuid",     "required": true, "constraint": "", "description": "변경자"},
+         {"name": "occurredAt", "type": "datetime", "required": true, "constraint": "", "description": "UTC"}
+       ]}
+    ]
+  },
+  "arch": {
+    "services": [
+      {"id": "SVC-01", "name": "식물 관리 서비스", "type": "Backend API", "tech_stack": "Spring Boot",
+       "deployment": {
+         "port": 8080, "replicas": 2,
+         "health_check_path": "/actuator/health",
+         "env_vars": ["DATABASE_URL", "REDIS_URL", "JWT_SECRET"],
+         "scaling_policy": "auto-cpu"
+       },
+       "external_dependencies": []},
+      {"id": "SVC-02", "name": "사용자 서비스", "type": "Backend API", "tech_stack": "Spring Boot",
+       "deployment": {
+         "port": 8081, "replicas": 2,
+         "health_check_path": "/actuator/health",
+         "env_vars": ["DATABASE_URL", "JWT_SECRET", "OAUTH_CLIENT_ID"],
+         "scaling_policy": "manual"
+       },
+       "external_dependencies": [
+         {"name": "OAuth Provider", "type": "OAuth 2.0", "purpose": "사용자 인증"}
+       ]},
+      {"id": "SVC-03", "name": "식물 모니터링 프론트엔드", "type": "Frontend", "tech_stack": "Vue.js",
+       "deployment": {"port": 0, "replicas": 1, "health_check_path": "", "env_vars": [], "scaling_policy": "manual"},
+       "external_dependencies": []}
+    ],
+    "databases": [
+      {"id": "DB-01", "name": "주 데이터베이스",        "type": "Relational Database", "tech_stack": "PostgreSQL"},
+      {"id": "DB-02", "name": "캐시 및 실시간 저장소", "type": "In-Memory",          "tech_stack": "Redis"}
+    ],
+    "connections": [
+      {"source_id": "SVC-03", "target_id": "SVC-01", "protocol": "HTTPS/REST", "description": "식물 API",     "auth": "bearer"},
+      {"source_id": "SVC-03", "target_id": "SVC-02", "protocol": "HTTPS/REST", "description": "사용자 API",   "auth": "bearer"},
+      {"source_id": "SVC-01", "target_id": "DB-01",  "protocol": "JDBC/TCP",   "description": "식물 데이터",   "auth": "basic"},
+      {"source_id": "SVC-02", "target_id": "DB-01",  "protocol": "JDBC/TCP",   "description": "사용자 데이터", "auth": "basic"},
+      {"source_id": "SVC-01", "target_id": "DB-02",  "protocol": "TCP",        "description": "실시간 캐시",   "auth": "basic"}
+    ]
+  },
+  "validation_report": {"total_errors": 0, "total_warnings": 1, "total_infos": 3}
+}

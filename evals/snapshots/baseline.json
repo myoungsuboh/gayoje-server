@@ -1,0 +1,133 @@
+{
+  "plant/graph_legacy": {
+    "overall": 0.26,
+    "summary": {
+      "api_count": 5,
+      "entity_count": 5,
+      "overall": 0.26,
+      "policy_count": 2,
+      "tier1": 1.0,
+      "tier2": 0.0,
+      "tier3": 0.0,
+      "tier4": 0.64
+    },
+    "tier1": {
+      "score": 1.0,
+      "sub_metrics": {
+        "arch_databases_present": 1.0,
+        "arch_services_present": 1.0,
+        "ddd_aggregates_present": 1.0,
+        "ddd_contexts_present": 1.0,
+        "spack_apis_present": 1.0,
+        "spack_entities_present": 1.0,
+        "spack_policies_present": 1.0
+      }
+    },
+    "tier2": {
+      "notes": [
+        "attributes 0개 — attribute_typed 미산정",
+        "API 3+ 인데 screens 0개 — FE 코드 정보 부족"
+      ],
+      "score": 0.0,
+      "sub_metrics": {
+        "aggregate_invariants_ratio": 0.0,
+        "api_auth_specified_ratio": 0.0,
+        "api_error_cases_ratio": 0.0,
+        "api_path_params_consistent_ratio": 0.0,
+        "api_request_body_ratio": 0.0,
+        "api_response_body_ratio": 0.0,
+        "api_validation_422_ratio": 0.0,
+        "entity_attributes_present_ratio": 0.0,
+        "screen_coverage_ratio": 0.0,
+        "service_deployment_ratio": 0.0
+      }
+    },
+    "tier3": {
+      "score": 0.0,
+      "sub_metrics": {
+        "aggregate_lineage_mapped_ratio": 0.0,
+        "api_story_mapped_ratio": 0.0,
+        "entity_lineage_direct_ratio": 0.0,
+        "entity_story_mapped_ratio": 0.0
+      }
+    },
+    "tier4": {
+      "notes": [],
+      "score": 0.64,
+      "sub_metrics": {
+        "error_score": 1.0,
+        "errors": 0.0,
+        "infos": 25.0,
+        "warning_score": 0.1,
+        "warnings": 18.0
+      }
+    }
+  },
+  "plant/graph_phase_a": {
+    "overall": 0.9539,
+    "summary": {
+      "api_count": 5,
+      "entity_count": 5,
+      "overall": 0.954,
+      "policy_count": 2,
+      "tier1": 1.0,
+      "tier2": 0.929,
+      "tier3": 0.95,
+      "tier4": 0.98
+    },
+    "tier1": {
+      "score": 1.0,
+      "sub_metrics": {
+        "arch_databases_present": 1.0,
+        "arch_services_present": 1.0,
+        "ddd_aggregates_present": 1.0,
+        "ddd_contexts_present": 1.0,
+        "spack_apis_present": 1.0,
+        "spack_entities_present": 1.0,
+        "spack_policies_present": 1.0
+      }
+    },
+    "tier2": {
+      "notes": [
+        "API 3+ 인데 screens 0개 — FE 코드 정보 부족"
+      ],
+      "score": 0.9286,
+      "sub_metrics": {
+        "aggregate_invariants_ratio": 1.0,
+        "api_auth_specified_ratio": 1.0,
+        "api_error_cases_ratio": 1.0,
+        "api_path_params_consistent_ratio": 1.0,
+        "api_request_body_ratio": 1.0,
+        "api_response_body_ratio": 1.0,
+        "api_validation_422_ratio": 1.0,
+        "attribute_typed_ratio": 1.0,
+        "connection_auth_ratio": 1.0,
+        "domain_entity_attributes_ratio": 1.0,
+        "domain_event_payload_ratio": 1.0,
+        "entity_attributes_present_ratio": 1.0,
+        "screen_coverage_ratio": 0.0,
+        "service_deployment_ratio": 1.0
+      }
+    },
+    "tier3": {
+      "score": 0.95,
+      "sub_metrics": {
+        "aggregate_lineage_mapped_ratio": 1.0,
+        "api_story_mapped_ratio": 1.0,
+        "entity_lineage_direct_ratio": 0.8,
+        "entity_story_mapped_ratio": 1.0
+      }
+    },
+    "tier4": {
+      "notes": [],
+      "score": 0.98,
+      "sub_metrics": {
+        "error_score": 1.0,
+        "errors": 0.0,
+        "infos": 3.0,
+        "warning_score": 0.95,
+        "warnings": 1.0
+      }
+    }
+  }
+}

@@ -1,0 +1,468 @@
+services:
+  # ─── Caddy reverse proxy (HTTPS termination) ──────────────────────
+  #
+  # 자동 Let's Encrypt 인증서로 HTTPS 를 종단. backend 컨테이너의 8000 포트는
+  # 외부에 직접 노출되지 않고 (commit 2 에서 ports 제거 예정) caddy 가
+  # 모든 외부 요청을 받아 reverse proxy.
+  #
+  # [필수 env var]
+  #   BACKEND_DOMAIN  : 예) api.example.com  ← DNS A 레코드가 이 호스트 IP 가리켜야 함
+  #   ACME_EMAIL      : Let's Encrypt 만료 알림용 이메일
+  #
+  # [DNS 사전 작업]
+  #   도메인 등록업체 (Cloudflare Registrar / Namecheap / Porkbun 등) 에서
+  #   A 레코드: api.example.com → YOUR_SERVER_IP
+  #   AAAA 레코드: 운영 IPv6 있으면 함께 (없으면 생략)
+  #
+  # [인증서 영속]
+  #   caddy_data 볼륨이 발급된 인증서 + ACME 계정 키 영구 보존 →
+  #   stack 재배포해도 같은 cert 재사용 (Let's Encrypt rate limit 회피).
+  #
+  # [Phase P0-1 commit 1] caddy 추가만. backend 의 8000 포트도 그대로 유지 →
+  # 사용자가 도메인 DNS 설정 + Caddyfile 검증 후 commit 2 에서 8000 비공개화.
+  #
+  # [Caddyfile 전달 방식 — configs.content (inline)]
+  # 기존엔 `./Caddyfile:/etc/caddy/Caddyfile:ro` bind-mount 였으나, Portainer
+  # web-editor 로 만든 stack 은 작업 디렉토리 (`/data/compose/<id>/`) 에 별도
+  # Caddyfile 파일이 없어 mount 실패 ("not a directory" 에러). git-deploy 와
+  # Portainer 양쪽 모두에서 동작하도록 docker-compose top-level `configs:` 의
+  # `content:` 필드로 Caddyfile 내용을 inline 화 — 단일 source-of-truth.
+  #
+  # ⚠️ 저장소의 `./Caddyfile` 파일은 local dev / `caddy validate` 용 reference.
+  # 운영 deploy 에 실제 사용되는 건 아래 configs.content. 두 파일이 다르면
+  # 운영 동작은 content 기준. 변경 시 둘 다 갱신 필수.
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3 (QUIC)
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+        mode: 0440
+    volumes:
+      - caddy_data:/data       # 인증서 + ACME 메타 (영구 보존 필수)
+      - caddy_config:/config   # 실행 시 설정 (선택)
+    # environment: 블록 제거됨 — Compose 가 deploy 시점에 configs.content 의
+    # ${VAR:-default} 를 substitute 하므로 Caddy 컨테이너 환경변수 불필요.
+    depends_on:
+      - backend
+    networks:
+      - default
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    # [2026-05] AOF (Append-Only File) 활성화 — 컨테이너 재시작 시 in-flight
+    # arq job 보존. RDB 만 쓰는 default 는 fsync 가 분 단위 → 재시작 직전 job
+    # 손실 위험. AOF + appendfsync everysec 는 worst-case 1초 손실 + 처리량 영향
+    # 미미 (Redis 가 fsync 를 백그라운드로 처리).
+    # JWT 블랙리스트도 영속화되어 컨테이너 재시작 후에도 logout 유지.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    volumes:
+      - redis_data:/data
+
+  # LiteLLM Proxy 는 별도 stack(`litellm`)으로 분리 운영 중.
+  # 통신은 외부 공유 네트워크 `litellm_net` 으로 — backend/worker 가
+  # `http://litellm:4000` 으로 해소. multi-key 로테이션·gemini-2.5-flash
+  # 통일 설정은 litellm stack 의 inline configs 가 보유.
+
+  backend:
+    build: .
+    container_name: backend
+    restart: always
+    command: ["python", "run.py"]
+    # [보안] 8000 포트 외부 노출 차단 (P1-4 완료).
+    # 모든 외부 트래픽은 Caddy(443) → backend:8000 reverse proxy 로만 도달.
+    # 같은 docker network(default) 안의 컨테이너(=caddy)만 backend:8000 접근 가능.
+    # 로컬 디버깅이 필요하면 임시로 ports 블록 복구 후 사용:
+    #   ports:
+    #     - "127.0.0.1:8000:8000"   # 로컬 호스트 바인딩 한정 (외부 공개 X)
+    # 모든 환경변수는 environment 블록에서 ${VAR} 로 명시.
+    # - Portainer 운영: Stack 의 "Environment variables" 에 등록하면 영구 보존
+    # - 로컬 dev: `docker compose --env-file .env up` 으로 명시 (compose 의 자동 .env 로드는
+    #   서비스 environment 에는 자동 주입 안 됨 — root .env 의 변수만 치환에 사용)
+    environment:
+      # ===== 인프라 =====
+      # NEO4J_URI: Aura 쓰면 neo4j+s://..., 자체 호스팅이면 bolt://neo4j:7687
+      # Stack env 에 등록 안 하면 default(자체 호스팅) 사용.
+      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/gayoje.db}
+
+      # ===== 운영 시크릿 (Portainer Stack 의 Environment variables 에서 주입) =====
+      # 이름만 명시 + default 없는 ${VAR} 라서:
+      #   - Portainer Stack env 에 등록되어 있으면 그 값을 주입
+      #   - 등록 안 되어 있으면 unset 처리 → env_file (.env) 또는 컨테이너 env 폴백
+      # → Portainer UI 의 Stacks → "Environment variables" 에 한 번 등록하면
+      #   redeploy / rebuild 해도 영구 보존됨.
+
+      # 인증 / 세션
+      #
+      # [int 변수의 default 안전망 — 2026-05-16 사고 후 추가]
+      # Portainer 가 stack env 를 어떤 이유로 비우면 ${VAR} 가 빈 문자열로
+      # 떨어져 pydantic int 파싱이 fail → backend crash. config.py 의 default
+      # (60, 7) 는 Settings 클래스 안 default 라 빈 문자열 env 를 못 잡아냄.
+      # 그래서 compose 단계에서 :- 로 default fallback. 운영 env 가 정상이면
+      # 이 값들은 override 되어 의미 없고, 비상 상황에서만 발화.
+      #
+      # JWT_SECRET_KEY 는 default 두면 안 됨 (보안) — production 부팅 검증
+      # (config.py model_validator) 이 default placeholder 거부.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+
+      # CORS / 도메인
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      ENV: ${ENV}
+
+      # Neo4j 자격증명
+      NEO4J_USERNAME: ${NEO4J_USERNAME}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_DATABASE: ${NEO4J_DATABASE}
+
+      # Gemini AI — LITELLM_PROXY_URL 가 설정되면 LiteLLM proxy 경유 (multi-key 로테이션).
+      # 미설정 시 GEMINI_API_KEY 단일 키로 Google API 직접 호출.
+      #
+      # [등급별 모델 분기 (2026-05)]
+      # GEMINI_MODEL_FREE / GEMINI_MODEL_PRO 가 설정되면 등급별로 다른 모델 사용.
+      # 둘 다 미설정 시 GEMINI_MODEL (legacy 단일 모델) 로 fallback — 기존 운영 호환.
+      # 정책 예:
+      #   GEMINI_MODEL_FREE     = gemini-2.5-flash-lite  (저비용 — 체험용)
+      #   GEMINI_MODEL_PRO      = gemini-2.5-flash       (안정 + 한 단계 위)
+      #   GEMINI_MODEL_PRO_PLUS = gemini-2.5-flash       (현재는 PRO 와 동일, 미래 확장 대비)
+      #   GEMINI_MODEL_PRO_MAX  = gemini-2.5-flash       (현재는 PRO 와 동일, 미래 확장 대비)
+      # 운영 노출 — PRO_PLUS / PRO_MAX 는 현재 BE 코드가 미사용 (모든 paid 등급이
+      # GEMINI_MODEL_PRO 로 통일). 등급별 다른 모델 적용 시 config.py + quota.py +
+      # jobs.py 분기 추가 필요. 운영 가시성/롤아웃 대비로 변수만 미리 노출.
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL_FREE: ${GEMINI_MODEL_FREE}
+      GEMINI_MODEL_LITE: ${GEMINI_MODEL_LITE}
+      GEMINI_MODEL_PRO: ${GEMINI_MODEL_PRO}
+      GEMINI_MODEL_PRO_PLUS: ${GEMINI_MODEL_PRO_PLUS}
+      GEMINI_MODEL_PRO_MAX: ${GEMINI_MODEL_PRO_MAX}
+      LITELLM_PROXY_URL: ${LITELLM_PROXY_URL:-http://litellm:4000}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      # ===== Gemini/autofill 튜닝 노브 (2026-06-10) =====
+      # compose environment 에 선언돼야 Portainer stack env → 컨테이너로 전달된다.
+      # `:-` default 는 미설정·빈 문자열 양쪽을 default 로 — 빈 env 로 인한
+      # int/float 파싱 crash(2026-05-16 사고 패턴) 방지.
+      GEMINI_TIMEOUT_SEC: ${GEMINI_TIMEOUT_SEC:-630}            # LLM per-call timeout(초) — litellm 최악 총시간(request_timeout 300 × (num_retries 1 +1) = 600)+여유. 짧으면 litellm 재시도 중 클라이언트가 끊고 중복 요청 증폭 (2026-06-11 실사고)
+      GEMINI_THINKING_BUDGET: ${GEMINI_THINKING_BUDGET:-}       # 비움=dynamic thinking(기존), 0=비활성, N=토큰 상한
+      AUTOFILL_LLM_CONCURRENCY: ${AUTOFILL_LLM_CONCURRENCY:-8}  # autofill 병렬 LLM 동시성
+      AUTOFILL_DRAFT_MODEL: ${AUTOFILL_DRAFT_MODEL:-}           # 비움=구독 모델, 예: gemini-2.5-flash-lite (초안 경량화)
+
+      # Swagger Basic Auth
+      DOCS_USERNAME: ${DOCS_USERNAME}
+      DOCS_PASSWORD: ${DOCS_PASSWORD}
+
+      # 토큰 컬럼 암호화 (OAuth access_token Fernet)
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+
+      # GitHub OAuth App
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET}
+      GITHUB_OAUTH_REDIRECT_URI: ${GITHUB_OAUTH_REDIRECT_URI}
+      GITHUB_OAUTH_SCOPES: ${GITHUB_OAUTH_SCOPES}
+      FRONTEND_OAUTH_CALLBACK_URL: ${FRONTEND_OAUTH_CALLBACK_URL}
+
+      # [2026-05] Google OAuth (https://console.cloud.google.com > Credentials > OAuth Client)
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI}
+      GOOGLE_OAUTH_SCOPES: ${GOOGLE_OAUTH_SCOPES:-openid,email,profile}
+
+      # [2026-05-17] Notion OAuth (https://www.notion.so/my-integrations 에서 Public Integration 등록)
+      NOTION_OAUTH_CLIENT_ID: ${NOTION_OAUTH_CLIENT_ID}
+      NOTION_OAUTH_CLIENT_SECRET: ${NOTION_OAUTH_CLIENT_SECRET}
+      NOTION_OAUTH_REDIRECT_URI: ${NOTION_OAUTH_REDIRECT_URI}
+
+      # (Toss Payments / INTERNAL_CRON_SECRET env 는 2026-06 Paddle MoR 전환으로 제거)
+
+      # ===== Paddle (Merchant of Record) 결제 — 2026-06 =====
+      # ⚠️ compose environment 에 선언돼야 Portainer stack env → 컨테이너로 전달된다.
+      #    (선언 안 하면 Portainer Stack 의 "Environment variables" 에 넣어도
+      #     ${VAR} 치환에만 쓰이고 컨테이너 안으로는 주입 안 됨 → 웹훅 503 / 서명검증 실패.)
+      # - PADDLE_API_KEY        : 서버 전용 (구독조회/고객포털). 절대 노출 금지.
+      # - PADDLE_WEBHOOK_SECRET : 웹훅 서명(Paddle-Signature) 검증. 미설정 시 웹훅 503.
+      # - PADDLE_ENV            : 'sandbox' | 'production' (API base 자동 전환). 기본 sandbox.
+      # - PADDLE_PRICE_*        : Price ID(pri_...) → 등급 매핑. FE 의 VITE_PADDLE_PRICE_* 와 동일 값.
+      PADDLE_API_KEY: ${PADDLE_API_KEY}
+      PADDLE_WEBHOOK_SECRET: ${PADDLE_WEBHOOK_SECRET}
+      PADDLE_ENV: ${PADDLE_ENV:-sandbox}
+      PADDLE_PRICE_PRO: ${PADDLE_PRICE_PRO}
+      PADDLE_PRICE_PRO_PLUS: ${PADDLE_PRICE_PRO_PLUS}
+      PADDLE_PRICE_PRO_MAX: ${PADDLE_PRICE_PRO_MAX}
+      PADDLE_PRICE_PRO_Y: ${PADDLE_PRICE_PRO_Y}
+      PADDLE_PRICE_PRO_PLUS_Y: ${PADDLE_PRICE_PRO_PLUS_Y}
+      PADDLE_PRICE_PRO_MAX_Y: ${PADDLE_PRICE_PRO_MAX_Y}
+
+      # [2026-05] Resend 이메일 (비밀번호 찾기 reset 링크 발송)
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-가요제 <onboarding@resend.dev>}
+      PASSWORD_RESET_URL: ${PASSWORD_RESET_URL}
+
+      # 관리자 자동 승격 이메일 (콤마/공백 구분)
+      ADMIN_EMAILS: ${ADMIN_EMAILS}
+
+      # [2026-05] 등급별 큐 분리 — Pro / Free 사용자 작업이 별도 큐로 라우팅됨.
+      # 두 env 모두 설정 시 분리. 미설정이면 단일 큐(ARQ_QUEUE_NAME) 통합 — 호환.
+      # 워커 컨테이너의 ARQ_QUEUE_NAME 을 각 큐로 맞춰야 효과 (아래 worker-pro/free 참조).
+      ARQ_QUEUE_NAME_PRO: ${ARQ_QUEUE_NAME_PRO}
+      ARQ_QUEUE_NAME_FREE: ${ARQ_QUEUE_NAME_FREE}
+
+      # ===== 관측성 (Observability) — 2026-05 =====
+      # LOG_FORMAT=json 이면 구조화 로그 (Loki/CloudWatch 수집기 친화), 기본 text.
+      # SENTRY_DSN 미설정 시 에러추적 비활성 (코드가 no-op) — 운영 안전.
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.0}
+      SENTRY_RELEASE: ${SENTRY_RELEASE}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+    volumes:
+      - sqlite_data:/data
+    networks:
+      - default
+      - neo4j_net
+      - litellm_net
+    depends_on:
+      - redis
+
+  # arq worker — backend 와 같은 이미지를 사용하지만 entrypoint 가 다름.
+  # 분리 이유:
+  #   1) post_meeting 같은 long-running job(CPS+PRD chain 30~120s) 이
+  #      uvicorn 과 같은 프로세스에서 돌면 web request latency 에 영향.
+  #   2) worker 만 따로 scale 가능 (`docker compose up -d --scale worker=2|3`).
+  #   3) worker 가 OOM 으로 죽어도 web 은 살아있음 (반대도 성립).
+  #   4) 시크릿 표면 축소 — worker 는 JWT_SECRET / OAuth secret / DOCS_PASSWORD
+  #      / TOKEN_ENCRYPTION_KEY 를 받지 않음. 침입 시 토큰 위조 불가.
+  #
+  # replicas:
+  #   - `deploy.replicas` 는 swarm 전용 — `docker compose` 는 무시.
+  #   - 운영에서는 `docker compose up -d --scale worker=2` 로 띄움 (deploy.yml 참조).
+  #   - 4GB 호스트 기준 권장: replicas=2, worker 당 ARQ_MAX_JOBS=2 → 동시 4개.
+  worker:
+    build: .
+    # container_name 지정 금지 — replicas 시 충돌
+    restart: always
+    command: ["arq", "app.queue.worker.WorkerSettings"]
+    environment:
+      # ===== 인프라 (backend 와 동일) =====
+      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+
+      # ===== 실행 환경 =====
+      ENV: ${ENV}
+
+      # worker context flag — config.py 의 production JWT_SECRET validator 가
+      # worker 에선 skip 되도록 (worker 는 JWT 발급/검증 안 함). backend 에는 이 flag
+      # 없으므로 backend 는 정상 검증.
+      HARNESS_WORKER_CONTEXT: "1"
+
+      # ===== Neo4j 자격증명 =====
+      NEO4J_USERNAME: ${NEO4J_USERNAME}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_DATABASE: ${NEO4J_DATABASE}
+
+      # ===== Gemini AI (pipeline LLM 호출용) =====
+      # backend 와 동일 — LiteLLM proxy 경유. 등급별 모델 분기 (2026-05):
+      #   GEMINI_MODEL_FREE / GEMINI_MODEL_PRO 설정 시 worker 가 두 GeminiClient 를
+      #   lifeline-shared 로 미리 생성. 미설정 시 GEMINI_MODEL 단일 모델 fallback.
+      # PRO_PLUS / PRO_MAX 는 현재 BE 가 미사용 (paid 등급은 모두 GEMINI_MODEL_PRO).
+      # 운영 가시성 / 미래 확장 대비로 변수만 노출.
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL_FREE: ${GEMINI_MODEL_FREE}
+      GEMINI_MODEL_LITE: ${GEMINI_MODEL_LITE}
+      GEMINI_MODEL_PRO: ${GEMINI_MODEL_PRO}
+      GEMINI_MODEL_PRO_PLUS: ${GEMINI_MODEL_PRO_PLUS}
+      GEMINI_MODEL_PRO_MAX: ${GEMINI_MODEL_PRO_MAX}
+      LITELLM_PROXY_URL: ${LITELLM_PROXY_URL:-http://litellm:4000}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      # ===== Gemini/autofill 튜닝 노브 (2026-06-10) — backend 블록과 동일 =====
+      # worker 가 LLM 잡(design/autofill 등)의 실 실행 주체라 여기 설정이 실제 효과.
+      GEMINI_TIMEOUT_SEC: ${GEMINI_TIMEOUT_SEC:-630}            # LLM per-call timeout(초) — litellm 최악 총시간(600)+여유 (backend 블록 주석 참고)
+      GEMINI_THINKING_BUDGET: ${GEMINI_THINKING_BUDGET:-}       # 비움=dynamic thinking(기존), 0=비활성, N=토큰 상한
+      AUTOFILL_LLM_CONCURRENCY: ${AUTOFILL_LLM_CONCURRENCY:-8}  # autofill 병렬 LLM 동시성
+      AUTOFILL_DRAFT_MODEL: ${AUTOFILL_DRAFT_MODEL:-}           # 비움=구독 모델, 예: gemini-2.5-flash-lite
+
+      # ===== GitHub REST (lint / lineage 의 tree fetch) =====
+      # GitHub OAuth 토큰은 backend 가 호출자 단위로 주입 — worker 에선 환경변수
+      # GITHUB_TOKEN 만 사용 (anonymous 60/hr → 인증 5000/hr).
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+
+      # ===== arq worker 튜닝 =====
+      # max_jobs: 워커 1대당 동시 실행 가능한 job 수
+      # max_tries: transient(GeminiError 5xx 등) 자동 재시도 횟수
+      # job_timeout: 1 job 최대 실행 시간 (초)
+      # keep_result: 완료 결과를 Redis 에 보관할 시간 (status 조회용)
+      ARQ_MAX_JOBS: ${ARQ_MAX_JOBS:-2}
+      ARQ_MAX_TRIES: ${ARQ_MAX_TRIES:-3}
+      ARQ_JOB_TIMEOUT_SEC: ${ARQ_JOB_TIMEOUT_SEC:-300}
+      ARQ_KEEP_RESULT_SEC: ${ARQ_KEEP_RESULT_SEC:-3600}
+      ARQ_QUEUE_NAME: ${ARQ_QUEUE_NAME:-gayoje:jobs}
+
+      # ===== Lint Phase A 샘플링 튜닝 (2026-05) =====
+      # 중대형 repo (>1000 files) 에서 false negative 줄이려면 늘림. 토큰 비용 ↑.
+      LINT_MAX_SAMPLE_FILES: ${LINT_MAX_SAMPLE_FILES:-40}
+      LINT_PER_FILE_BYTES: ${LINT_PER_FILE_BYTES:-64000}
+      LINT_TOTAL_BUDGET_BYTES: ${LINT_TOTAL_BUDGET_BYTES:-400000}
+      LINT_RESIDUAL_LLM_BUDGET: ${LINT_RESIDUAL_LLM_BUDGET:-80000}
+
+      # ===== Redis 연결 튜닝 =====
+      # backend 는 token_blacklist 가 매 요청 hot path 라 fail-fast(1s × 1) 가
+      # 적절하지만, worker 는 부팅 시 1회 연결 + long-running 이므로 retry 여유 ↑.
+      REDIS_CONN_TIMEOUT_SEC: ${WORKER_REDIS_CONN_TIMEOUT_SEC:-5}
+      REDIS_CONN_RETRIES: ${WORKER_REDIS_CONN_RETRIES:-5}
+      REDIS_CONN_RETRY_DELAY_SEC: ${WORKER_REDIS_CONN_RETRY_DELAY_SEC:-2}
+
+      # ===== 관측성 (backend 와 동일) — 2026-05 =====
+      # worker job 실패가 Sentry component=worker 태그로 분리 수집됨 (on_startup 에서 init).
+      # job 메트릭(worker_jobs_total / worker_job_duration_seconds)은 워커엔 ASGI
+      # /metrics 가 없어, on_startup 이 WORKER_METRICS_PORT 로 독립 prometheus 노출
+      # 서버(데몬 스레드)를 띄운다 → Prometheus 가 worker:<port>/metrics 스크랩.
+      # METRICS_ENABLED=false 또는 prometheus 미설치 시 미기동(graceful).
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.0}
+      SENTRY_RELEASE: ${SENTRY_RELEASE}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      WORKER_METRICS_PORT: ${WORKER_METRICS_PORT:-9100}
+    # 워커 메트릭 노출 포트 — 같은 docker 네트워크의 Prometheus 만 접근(호스트 미공개).
+    expose:
+      - "${WORKER_METRICS_PORT:-9100}"
+    # SQLite 볼륨 마운트 안 함 — worker 는 sqlite 사용 안 함 (모두 Neo4j)
+    networks:
+      - default
+      - neo4j_net
+      - litellm_net
+    depends_on:
+      - redis
+    deploy:
+      replicas: 2     # swarm 전용 — `docker compose` 는 무시.
+                      # 실제 scale 은 `docker compose up -d --scale worker=2`.
+    # [2026-05 Phase 5 — OOM 격리 강화] worker 1대가 호스트 메모리를 독식해
+    # 다른 컨테이너(backend/redis)까지 OOM-kill 당하는 것을 방지하는 상한.
+    # WORKER_MEM_LIMIT 미설정 시 1.5g (4GB 호스트 · replicas=2 기준 안전값).
+    # 상한 초과 시 해당 worker 컨테이너만 OOM-kill → restart:always 로 자동 복구,
+    # backend/web 은 무영향 (컨테이너 분리 효과). LLM 호출 메모리가 더 크면 상향.
+    mem_limit: ${WORKER_MEM_LIMIT:-1536m}
+
+  # ─────────────────────────────────────────────────────────────
+  # (billing-cron 서비스는 2026-06 Paddle MoR 전환으로 폐기 — 갱신/대사/만료를
+  #  Paddle 이 처리하므로 내부 cron 스케줄러가 불필요. 운영 Portainer 스택에서도
+  #  billing-cron 블록을 제거할 것.)
+
+  # ─────────────────────────────────────────────────────────────
+  # [2026-05] 등급별 큐 분리 — 선택적 운영 (Pro SLA 보장 시 활성화)
+  #
+  # 활성화 방법:
+  #   1. .env 에 다음 두 줄 추가:
+  #        ARQ_QUEUE_NAME_PRO=gayoje:jobs:pro
+  #        ARQ_QUEUE_NAME_FREE=gayoje:jobs:free
+  #   2. 기존 `worker` 서비스 주석/제거 (또는 ARQ_QUEUE_NAME 만 둘 중 하나로 설정).
+  #   3. 아래 worker-pro / worker-free 의 주석 해제.
+  #   4. docker compose up -d --scale worker-pro=1 --scale worker-free=2
+  #
+  # 미활성화 시 (현 기본): 모든 작업이 단일 `worker` 서비스로 처리됨 — backward compat.
+  #
+  # worker-pro:
+  #   build: .
+  #   restart: always
+  #   command: ["arq", "app.queue.worker.WorkerSettings"]
+  #   environment:
+  #     <<: *worker-env-base    # YAML anchor 도입 시 사용 (옵션). 또는 위 worker 환경 복붙.
+  #     ARQ_QUEUE_NAME: ${ARQ_QUEUE_NAME_PRO:-gayoje:jobs:pro}
+  #     ARQ_MAX_JOBS: ${ARQ_MAX_JOBS_PRO:-2}
+  #   networks: [default, neo4j_net, litellm_net]
+  #   depends_on: [redis]
+  #
+  # worker-free:
+  #   build: .
+  #   restart: always
+  #   command: ["arq", "app.queue.worker.WorkerSettings"]
+  #   environment:
+  #     <<: *worker-env-base
+  #     ARQ_QUEUE_NAME: ${ARQ_QUEUE_NAME_FREE:-gayoje:jobs:free}
+  #     ARQ_MAX_JOBS: ${ARQ_MAX_JOBS_FREE:-2}
+  #   networks: [default, neo4j_net, litellm_net]
+  #   depends_on: [redis]
+  # ─────────────────────────────────────────────────────────────
+
+volumes:
+  redis_data:
+  sqlite_data:
+  # Caddy 의 발급된 Let's Encrypt 인증서 + ACME 계정 키 영구 보존.
+  # 재배포 시에도 동일 cert 재사용 → Let's Encrypt rate limit 회피.
+  caddy_data:
+  caddy_config:
+
+networks:
+  neo4j_net:
+    external: true
+    name: neo4j_default
+  # litellm stack 이 생성·소유. 이쪽에선 external 로 join 만.
+  litellm_net:
+    external: true
+
+# ─── Caddy 설정 (inline) ──────────────────────────────────────────
+#
+# Portainer web-editor stack 호환을 위해 Caddyfile 내용을 inline. bind-mount
+# 였다면 stack 디렉토리에 별도 파일이 필요했으나, configs.content 면 docker
+# compose 가 자체 임시 파일로 mount → 외부 파일 의존성 0.
+#
+# [변수 substitution 방식 — Compose-side]
+# Caddy 의 `{$VAR}` placeholder 대신 Compose 의 `${VAR:-default}` 사용.
+# Compose 가 deploy 시점에 값 substitute → 렌더된 Caddyfile 에는 literal
+# 값 (예: `api.example.com`) 이 baked-in. 장점:
+#  - `$$` escape 같은 모호함 없음 (이전 시도에서 `$$` 가 그대로 남는 문제)
+#  - Caddy 컨테이너 env 에 BACKEND_DOMAIN/ACME_EMAIL 안 넘겨도 됨
+#  - 값이 바뀌면 redeploy 만 하면 자동 반영
+#
+# ⚠️ 저장소의 ./Caddyfile 은 Caddy 문법 (`{$VAR}`) 그대로 — local dev /
+# `caddy validate` 용 reference. 운영 deploy 엔 아래 content 가 source.
+configs:
+  caddyfile:
+    content: |
+      {
+          email ${ACME_EMAIL:-placeholder@example.com}
+      }
+
+      ${BACKEND_DOMAIN:-localhost} {
+          reverse_proxy backend:8000 {
+              transport http {
+                  read_timeout 305s
+                  write_timeout 305s
+                  dial_timeout 5s
+              }
+              header_up X-Real-IP {remote_host}
+          }
+          header {
+              X-Frame-Options "DENY"
+              X-Content-Type-Options "nosniff"
+              Strict-Transport-Security "max-age=31536000; includeSubDomains"
+              Referrer-Policy "strict-origin-when-cross-origin"
+              -Server
+          }
+          log {
+              output stdout
+              format console
+              level INFO
+          }
+      }
+
+      :80 {
+          redir https://{host}{uri} permanent
+      }

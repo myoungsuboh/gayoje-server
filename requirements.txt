@@ -1,0 +1,47 @@
+# Web framework
+fastapi==0.128.0
+uvicorn[standard]==0.40.0
+python-multipart==0.0.22
+
+# MCP (Model Context Protocol)
+fastmcp==2.14.5
+mcp==1.26.0
+
+# HTTP client (Gemini REST + GitHub REST)
+httpx==0.28.1
+
+# Windows + Python 3.13 의 SSL CA store 호환을 위해 명시 pin.
+# app/__init__.py 가 SSL_CERT_FILE 을 certifi.where() 로 강제.
+certifi>=2024.2
+
+# Auth / security
+PyJWT==2.11.0
+bcrypt==4.2.0
+slowapi==0.1.9
+# Fernet 대칭 암호화 — OAuth access_token 컬럼 보호 등. PyJWT 가 transitive
+# 로 끌고 오지만 직접 의존성으로 명시 (버전 고정).
+cryptography>=42.0.0
+
+# Schemas
+pydantic==2.12.5
+pydantic-settings==2.12.0
+email-validator==2.3.0
+
+# Env
+python-dotenv==1.2.1
+
+# Pipelines — Gemini via REST (httpx) + Neo4j async driver
+neo4j==5.27.0
+
+# Job queue (arq) + Redis async client. Redis 는 또한 JWT jti 블랙리스트 저장소.
+arq==0.26.3
+
+# === 관측성 (Observability) — 2026-05 ===
+# Sentry 에러 추적. SENTRY_DSN 설정 시에만 활성 (미설정이면 코드가 no-op).
+# [fastapi] extra 로 Starlette/FastAPI ASGI 통합 포함.
+sentry-sdk[fastapi]==2.20.0
+# Prometheus 메트릭 노출 (/metrics) — HTTP / worker job 계측.
+prometheus-client==0.21.1
+
+# === Test (only installed in dev) ===
+# pytest, pytest-asyncio: see requirements-dev.txt

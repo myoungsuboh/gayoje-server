@@ -1,0 +1,88 @@
+# LiteLLM Proxy 설정
+#
+# 목적: Gemini API 쿼터 소진(429) 시 다른 API 키로 자동 fallback.
+#       단일 키 만료/소진으로 전체 서비스 다운되는 것을 방지.
+#
+# 운영:
+#   - GEMINI_API_KEY_1/_2/_3: 무료 티어 키 3개 (Google Cloud 계정 3개로 발급)
+#   - LITELLM_MASTER_KEY: 백엔드가 LiteLLM proxy 호출 시 인증 (시크릿)
+#   - Portainer Stack 의 Environment variables 에 위 값 등록
+#
+# 키가 하나만 있어도 작동 — model_list 항목은 있는 키 만큼만 환경변수에 채우면 됨.
+# LiteLLM 은 os.environ/X 가 unset 이면 해당 모델 항목을 자동 skip.
+
+model_list:
+  # ─── PRO 등급 모델 — gemini-2.5-flash ───
+  # 키 3개를 동일 model_name 으로 등록해 router 가 라운드로빈/셔플.
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY_1
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY_2
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY_3
+
+  # ─── 저비용(FREE / LITE 오버플로우) 모델 — gemini-2.5-flash-lite ───
+  # [2026-06] Google 이 gemini-2.0-flash-lite 를 폐기(런타임 404 "no longer available")해
+  # 살아있는 gemini-2.5-flash-lite 로 이전. 3개 키로 등록 → router 라운드로빈/셔플.
+  - model_name: gemini-2.5-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY_1
+  - model_name: gemini-2.5-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY_2
+  - model_name: gemini-2.5-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY_3
+
+  # 별칭 — 코드/설정에 남은 옛 이름(gemini-2.0-flash-lite) 호출도 live 2.5-flash-lite 로
+  # 라우팅해 404 를 방지 (안전망). 점진 정리 후 제거 가능.
+  - model_name: gemini-2.0-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY_1
+  - model_name: gemini-2.0-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY_2
+  - model_name: gemini-2.0-flash-lite
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY_3
+
+litellm_settings:
+  # 4xx/5xx 응답에서 모르는 파라미터 자동 제거 (Gemini 가 OpenAI param 일부 거부)
+  drop_params: true
+  # [2026-06-11 타임아웃 정합 — 실사고] 대형 설계(SPACK) 생성은 Gemini 가 정직하게
+  # 180s+ 를 쓰는데, request_timeout 이 그보다 짧으면 litellm 이 '정상 진행 중인'
+  # 생성을 끊고 num_retries 만큼 다시 끊기를 반복 — 같은 호출에 timeout×(retries+1)
+  # 분이 통째로 낭비됐다 (실측: 180s×4 + 클라이언트 증폭 = 10분째 10% 멈춤).
+  # 정합 원칙: request_timeout 은 '진짜 생성 1회'를 수용할 만큼 길게, timeout 재시도는
+  # 최소로 (재시도해도 또 오래 걸릴 뿐). 429 키 로테이션은 router cooldown 이 담당.
+  # ⚠️ backend/worker 의 GEMINI_TIMEOUT_SEC 은 반드시 (request_timeout × (num_retries+1))
+  # 보다 길게 — 짧으면 클라이언트가 litellm 재시도 도중 끊고 중복 요청을 쏜다(증폭).
+  num_retries: 1
+  request_timeout: 300
+
+router_settings:
+  # simple-shuffle: 매 요청마다 model_list 에서 무작위로 키 선택 → 자연스러운 부하 분산
+  # (least-busy 보다 단순하고 무료 티어 RPM 회피에 효과적)
+  routing_strategy: simple-shuffle
+
+  # 429 받은 키는 1분간 cooldown (다른 키로만 라우팅)
+  cooldown_time: 60
+
+  # 동일 deployment 가 짧은 시간에 여러 번 fail 하면 일시 차단
+  allowed_fails: 2
+
+general_settings:
+  # backend 가 호출 시 사용할 API 키 (LITELLM_MASTER_KEY 와 매칭)
+  master_key: os.environ/LITELLM_MASTER_KEY

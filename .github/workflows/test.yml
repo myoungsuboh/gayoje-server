@@ -1,0 +1,87 @@
+# PR / push 시 pytest 자동 실행 (안전망).
+#
+# 목적:
+#   master 직접 푸시 → deploy.yml 이 SSH 로 자동 운영 배포 → 부서진 채로 사용자 노출.
+#   PR 시점 또는 push 직후 빨간 X 로 머지/배포 신호 차단.
+#
+# 트리거:
+#   - push: master 브랜치 직접 푸시 (deploy.yml 과 병렬 실행 — deploy 는 SSH, 이건 pytest)
+#   - pull_request: PR 생성/업데이트 (머지 전 검증)
+#
+# 테스트 셋업 (pytest.ini + tests/conftest.py):
+#   - asyncio_mode = auto, strict-markers
+#   - Gemini / Neo4j 는 fake 로 대체 (빠르고 결정적). 51+ 테스트.
+#   - integration 마커는 RUN_INTEGRATION=1 일 때만 실 호출 → CI 에서는 자동 skip.
+#
+# Python 3.12 — Dockerfile (python:3.12-slim) 와 정합.
+name: Test (BE)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        # requirements-dev.txt 가 requirements.txt 를 -r 로 포함 → 한 번에 설치.
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        # integration 마커 테스트는 RUN_INTEGRATION 미설정이라 conftest 가 자동 skip.
+        # 추가 안전망: -m "not integration" 으로 명시 (정책 변경 시에도 safe).
+        run: pytest -m "not integration"
+        env:
+          RUN_INTEGRATION: '0'
+
+  # testcontainers — 실제 Neo4j 컨테이너로 Cypher 시맨틱 검증 (단위 게이트와 병렬).
+  #
+  # 왜 별도 job 인가:
+  #   FakeNeo4j(단위) 는 canned 단일행만 돌려줘 collect/UNWIND 다중행 집계 결함을
+  #   구조적으로 못 잡는다. 실제로 lineage 그래프가 '노드 다수 + 엣지 1개' 로 깨진
+  #   사고(2026-06)가 단위 3,000+ 그린에도 통과했다. 이 job 이 그 구조적 안전망.
+  #   GitHub ubuntu-latest 러너는 Docker 데몬이 있어 testcontainers 가 동작한다.
+  #   단위 test job 과 분리해 빠른 PR 게이트 속도는 유지하고 여기서 병렬로 검증.
+  testcontainers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        # requirements-dev.txt 가 testcontainers[neo4j] + neo4j driver 를 포함.
+        run: pip install -r requirements-dev.txt
+
+      - name: Run testcontainers tests
+        # RUN_TESTCONTAINERS=1 + Docker 데몬(러너 기본 제공) → 실제 Neo4j 띄워 검증.
+        # 마커 미일치 시(=tc 테스트 0개) pytest exit 5 를 성공으로 처리.
+        run: pytest -m testcontainers || ([ $? -eq 5 ] && echo "no testcontainers tests collected")
+        env:
+          RUN_TESTCONTAINERS: '1'

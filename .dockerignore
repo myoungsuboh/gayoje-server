@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 가상환경 (컨테이너 안에서 새로 설치)
+.venv/
+venv/
+env/
+
+# 로컬 환경 설정 (Fly secret 으로 주입)
+.env
+.env.local
+.env.*.local
+
+# DB 파일 (볼륨으로 관리)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 테스트 / CI
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 로그
+*.log
+logs/

@@ -1,0 +1,151 @@
+name: Deploy via Portainer API (manual only)
+
+# ⚠️ 자동 push trigger 비활성화 — Portainer GitOps polling 이 자동 배포 책임.
+#
+# 이 workflow 는 수동 dispatch (workflow_dispatch) 로만 트리거 가능.
+# Re-run 또는 수동 실행 시 stack env 가 wipe 되는 사고가 한 번 있었으므로 (2026-05-16),
+# 일상 운영에서는 절대 실행하지 말 것.
+#
+# 정상 자동 배포 흐름 (2026-05-16 이후):
+#   git push origin master
+#     ↓
+#   Portainer GitOps polling (5분 interval)
+#     ↓ master 새 commit 감지
+#     ↓ /data/compose/6 에서 git pull
+#     ↓ docker compose up (UI Pull and redeploy 와 동일 흐름)
+#     ↓ stack.env / portainer.db env 안전 유지
+#   운영 반영 (최대 5분 delay)
+#
+# 이 workflow 가 호출하는 PUT /api/stacks/{id}/git/redeploy 는 Portainer CE 에서
+# stack env 를 wipe 하는 부수효과가 있어서 안전하지 않음. 사용 금지.
+#
+# 비상 시에만 (Portainer polling 이 멈췄을 때) GitHub UI 에서 Run workflow 로 수동 실행.
+
+on:
+  workflow_dispatch:
+
+# ─── 아래는 비상용 코드 — 자동 실행 안 됨 ──────────────────────────
+#
+# 이전 sequential 흐름 ref:
+#   1) SSH 로 /root/harness-server 에서 docker compose up (deprecated, env mismatch)
+#   2) Portainer API redeploy (deprecated, env wipe 사고)
+# 둘 다 운영에서 비활성화. 위의 Portainer GitOps polling 으로 대체됨.
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ─── 1) Stack redeploy (git pull + docker compose up, env 자동 주입) ──
+      #
+      # Portainer CE 의 git/redeploy API 동작 특이점:
+      #   UI 의 "Pull and redeploy" 는 stack 에 저장된 git credentials 를 자동으로
+      #   body 에 채워서 호출. 하지만 외부에서 API 를 직접 호출하면 그 자동 채움이
+      #   안 일어남 → body 의 repositoryAuthentication 이 false default → private
+      #   repo 에 anonymous 시도 → "Repository not found".
+      #
+      # 그래서 body 에 git 인증 정보 명시적 전달.
+      #   - repositoryAuthentication: true (인증 사용 명시)
+      #   - repositoryUsername: GitHub username (= harness-server owner)
+      #   - repositoryPassword: GitHub Personal Access Token (repo scope)
+      #
+      # PAT 는 Portainer Stack UI 에 등록한 같은 값 — GitHub Secrets 의 GIT_PAT 로 주입.
+      - name: Trigger Portainer stack redeploy
+        env:
+          PORTAINER_HOST: ${{ secrets.PORTAINER_HOST }}
+          PORTAINER_TOKEN: ${{ secrets.PORTAINER_TOKEN }}
+          PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
+          # Docker 환경 ID — Portainer UI 의 stack URL `/#!/3/docker/stacks/...` 의
+          # `/3/` 부분. 기본값 3 (사용자 환경). 다르면 secret 으로 override.
+          PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID || '3' }}
+          # GitHub PAT — Portainer Stack 의 Authentication 에 등록한 같은 값이어야 함.
+          # GitHub Secrets 자동 마스킹으로 log 에 ***로 표시.
+          GIT_PAT: ${{ secrets.GIT_PAT }}
+        run: |
+          set -e
+          echo "==> Stack redeploy"
+          echo "    host=${PORTAINER_HOST}  stack=${PORTAINER_STACK_ID}  endpoint=${PORTAINER_ENDPOINT_ID}"
+
+          # body 를 heredoc 으로 빌드 — PAT 가 ps/log 에 안 새도록 변수만 사용.
+          # GitHub username (myoungsuboh) 은 repo owner 라 하드코딩 (변경 잦지 않음).
+          PAYLOAD=$(cat <<JSON
+          {
+            "prune": false,
+            "pullImage": true,
+            "repositoryAuthentication": true,
+            "repositoryUsername": "myoungsuboh",
+            "repositoryPassword": "${GIT_PAT}"
+          }
+          JSON
+          )
+
+          HTTP_STATUS=$(curl -sS -o /tmp/redeploy.out -w "%{http_code}" \
+            -X PUT \
+            "${PORTAINER_HOST}/api/stacks/${PORTAINER_STACK_ID}/git/redeploy?endpointId=${PORTAINER_ENDPOINT_ID}" \
+            -H "X-API-Key: ${PORTAINER_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}")
+
+          echo "    HTTP ${HTTP_STATUS}"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Portainer stack redeploy failed (HTTP ${HTTP_STATUS})"
+            echo "Response body (PAT 가 로그에 포함되지 않음 — GitHub 자동 마스킹):"
+            cat /tmp/redeploy.out || true
+            exit 1
+          fi
+          echo "✓ Stack redeploy triggered"
+
+      # ─── 2) Caddy 재시작 — backend 새 IP 로 upstream DNS 재해소 ──
+      # backend / worker 가 새 컨테이너로 만들어지면 새 IP 가 부여됨. caddy 는
+      # 변경 없으니 재시작 안 됨 → upstream DNS 캐시 옛 IP 유지 → 502.
+      # 명시적으로 caddy 재시작해서 DNS 재해소. 사용자 영향 1~2초 (Cloudflare retry).
+      - name: Restart caddy container
+        env:
+          PORTAINER_HOST: ${{ secrets.PORTAINER_HOST }}
+          PORTAINER_TOKEN: ${{ secrets.PORTAINER_TOKEN }}
+          PORTAINER_ENDPOINT_ID: ${{ secrets.PORTAINER_ENDPOINT_ID || '3' }}
+        run: |
+          set -e
+          echo "==> Wait 10s for stack redeploy to complete..."
+          sleep 10
+
+          echo "==> Restart caddy container"
+          HTTP_STATUS=$(curl -sS -o /tmp/restart.out -w "%{http_code}" \
+            -X POST \
+            "${PORTAINER_HOST}/api/endpoints/${PORTAINER_ENDPOINT_ID}/docker/containers/caddy/restart" \
+            -H "X-API-Key: ${PORTAINER_TOKEN}")
+
+          # Docker API 의 container restart 는 204 No Content 가 성공.
+          # 200 도 일부 버전에서 가능.
+          echo "    HTTP ${HTTP_STATUS}"
+          if [ "$HTTP_STATUS" != "204" ] && [ "$HTTP_STATUS" != "200" ]; then
+            echo "::warning::Caddy restart returned HTTP ${HTTP_STATUS} (계속 진행, health check 로 확인)"
+            cat /tmp/restart.out || true
+          else
+            echo "✓ Caddy restarted"
+          fi
+
+      # ─── 3) Health check (배포 자가 검증) ──
+      - name: Verify backend health
+        run: |
+          set -e
+          echo "==> Wait 5s for caddy to come back..."
+          sleep 5
+
+          echo "==> Health check via api.example.com"
+          for i in 1 2 3 4 5 6; do
+            if curl -sf -o /dev/null --max-time 5 https://api.example.com/health; then
+              echo "✓ Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "  attempt $i failed, retry in 5s..."
+            sleep 5
+          done
+
+          echo "::error::Health check failed after Portainer redeploy + caddy restart."
+          echo "Possible causes:"
+          echo "  - Portainer redeploy 실패 (위 step 로그 확인)"
+          echo "  - Caddy 가 backend upstream 못 찾음 (Portainer UI > caddy logs)"
+          echo "  - Cloudflare 또는 DNS 이슈"
+          exit 1

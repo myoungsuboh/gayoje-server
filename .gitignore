@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+.venv-*/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# 환경 설정
+.env
+.env.local
+.env.*.local
+
+# DB 파일 (SQLite)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 로그
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
