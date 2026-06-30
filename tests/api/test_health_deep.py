@@ -23,7 +23,7 @@ pytestmark = pytest.mark.asyncio
 @pytest.fixture
 def fake_deps(monkeypatch):
     """Neo4j + Redis 응답 토글."""
-    state = {"neo4j_ok": True, "redis_ok": True}
+    state = {"neo4j_ok": True, "redis_ok": True, "pg_ok": True}
 
     async def fake_cypher(cypher, params=None):
         if not state["neo4j_ok"]:
@@ -39,20 +39,33 @@ def fake_deps(monkeypatch):
     async def fake_get_pool():
         return _FakePool()
 
-    monkeypatch.setattr(
-        "app.main.neo4j_client.run_cypher", fake_cypher
-    )
-    monkeypatch.setattr(
-        "app.main.queue_client.get_pool", fake_get_pool
-    )
+    async def fake_check_db():
+        if not state["pg_ok"]:
+            raise RuntimeError("PG down")
+        return True
+
+    monkeypatch.setattr("app.main.neo4j_client.run_cypher", fake_cypher)
+    monkeypatch.setattr("app.main.queue_client.get_pool", fake_get_pool)
+    monkeypatch.setattr("app.main.check_db", fake_check_db)
     return state
 
 
 async def test_both_ok_returns_200(fake_deps):
     out = await health_deep()
     assert out["status"] == "healthy"
+    assert out["checks"]["postgres"] == "ok"
     assert out["checks"]["neo4j"] == "ok"
     assert out["checks"]["redis"] == "ok"
+
+
+async def test_postgres_down_returns_503(fake_deps):
+    fake_deps["pg_ok"] = False
+    with pytest.raises(HTTPException) as exc:
+        await health_deep()
+    assert exc.value.status_code == 503
+    assert "error" in exc.value.detail["checks"]["postgres"]
+    assert exc.value.detail["checks"]["neo4j"] == "ok"
+    assert exc.value.detail["checks"]["redis"] == "ok"
 
 
 async def test_neo4j_down_returns_503(fake_deps):

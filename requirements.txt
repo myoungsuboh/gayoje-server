@@ -36,6 +36,12 @@ neo4j==5.27.0
 # Job queue (arq) + Redis async client. Redis 는 또한 JWT jti 블랙리스트 저장소.
 arq==0.26.3
 
+# PostgreSQL (async) — 사용자/결제/정형 데이터 주력 SOR (BE-E01-T03)
+SQLAlchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+aiosqlite==0.20.0   # 로컬 dev/테스트 sqlite async 폴백
+
 # === 관측성 (Observability) — 2026-05 ===
 # Sentry 에러 추적. SENTRY_DSN 설정 시에만 활성 (미설정이면 코드가 no-op).
 # [fastapi] extra 로 Starlette/FastAPI ASGI 통합 포함.

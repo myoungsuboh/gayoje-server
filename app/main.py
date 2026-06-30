@@ -29,6 +29,7 @@ from app.core.limiter import limiter
 from app.core.metrics import MetricsMiddleware, render_metrics
 from app.core.observability import init_sentry, setup_logging
 from app.core.request_context import RequestIdMiddleware
+from app.infra.db import check_db, dispose_engine
 from app.queue import client as queue_client
 
 setup_logging()
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
         # lazy 생성이라 열린 적 없으면 no-op.
         await neo4j_client.close_driver()
         await queue_client.close_pool()
+        await dispose_engine()
     logger.info("[boot] gayoje-server 종료")
 
 
@@ -59,9 +61,19 @@ async def health() -> dict:
 
 @limiter.exempt
 async def health_deep() -> dict:
-    """의존성(Neo4j + Redis)까지 검증. 모두 OK→200, 하나라도 실패→503."""
-    results: dict = {"neo4j": "unknown", "redis": "unknown"}
+    """의존성(PostgreSQL + Neo4j + Redis)까지 검증. 모두 OK→200, 하나라도 실패→503."""
+    results: dict = {"postgres": "unknown", "neo4j": "unknown", "redis": "unknown"}
     failures: list[str] = []
+
+    try:
+        if await check_db():
+            results["postgres"] = "ok"
+        else:
+            results["postgres"] = "unexpected_response"
+            failures.append("postgres")
+    except Exception as e:  # noqa: BLE001
+        results["postgres"] = f"error: {type(e).__name__}"
+        failures.append("postgres")
 
     try:
         rows = await neo4j_client.run_cypher("RETURN 1 AS ok")

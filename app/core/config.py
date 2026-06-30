@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # 예: postgresql+asyncpg://user:pw@host:5432/gayoje
     # 로컬 개발은 sqlite 폴백(편의). 운영/수집(INGEST)은 PG 필수.
     DATABASE_URL: str = "sqlite+aiosqlite:///./gayoje_dev.db"
+    # PG 커넥션 풀 (sqlite 는 무시) — BE-E01-T03.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_RECYCLE_SEC: int = 1800   # 30분 — stale 커넥션 재활용
+    DB_POOL_TIMEOUT_SEC: int = 30     # 풀 고갈 시 대기 상한
 
     # JWT
     JWT_SECRET_KEY: str = "change-me-to-a-long-random-secret-string"
