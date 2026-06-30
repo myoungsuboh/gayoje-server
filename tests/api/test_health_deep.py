@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from app.api.main import health_deep
+from app.main import health_deep
 
 
 pytestmark = pytest.mark.asyncio
@@ -40,10 +40,10 @@ def fake_deps(monkeypatch):
         return _FakePool()
 
     monkeypatch.setattr(
-        "app.api.main.neo4j_client.run_cypher", fake_cypher
+        "app.main.neo4j_client.run_cypher", fake_cypher
     )
     monkeypatch.setattr(
-        "app.api.main.queue_client.get_pool", fake_get_pool
+        "app.main.queue_client.get_pool", fake_get_pool
     )
     return state
 

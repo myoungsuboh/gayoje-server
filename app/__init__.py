@@ -5,7 +5,7 @@
 # 별로 빠지지 않도록 보장.
 #
 # 1. .env 자동 load
-#    - run.py 는 `load_dotenv()` 를 직접 호출하지만 `uvicorn app.api.main:app`
+#    - run.py 는 `load_dotenv()` 를 직접 호출하지만 `uvicorn app.main:app`
 #      형태로 부팅 시엔 우회됨. 여기서 보장.
 #
 # 2. Windows + Python 3.13 SSL CA store 호환 fix

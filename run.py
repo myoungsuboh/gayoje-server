@@ -1,6 +1,6 @@
 """
-Harness Backend Entrypoint
-프론트엔드(Vue) → 본 백엔드(FastAPI) → Neo4j / Gemini 의 진입점.
+gayoje-server Entrypoint
+프론트엔드(Vue3+Vuetify) → 본 백엔드(FastAPI, app.main:app) → PostgreSQL / Neo4j 의 진입점.
 """
 import os
 import sys
@@ -29,11 +29,11 @@ if __name__ == "__main__":
     is_dev = os.getenv("ENV", "development") == "development"
     port = int(os.getenv("PORT", "8000"))
 
-    print(f"🚀 Harness Backend 시작 ({'Development' if is_dev else 'Production'} 모드)")
+    print(f"🚀 gayoje-server 시작 ({'Development' if is_dev else 'Production'} 모드)")
     print(f"   - 포트: {port}")
 
     uvicorn.run(
-        "app.api.main:app",
+        "app.main:app",
         host="0.0.0.0",
         port=port,
         reload=is_dev,      # 개발 모드일 때만 자동 재시작

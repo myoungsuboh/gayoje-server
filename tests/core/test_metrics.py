@@ -38,7 +38,7 @@ def test_record_job_increments_counter():
 
 def test_metrics_endpoint_enabled():
     from app.core.config import settings
-    import app.api.main as m
+    import app.main as m
 
     settings.METRICS_ENABLED = True
     client = TestClient(m.app)
@@ -53,7 +53,7 @@ def test_metrics_endpoint_enabled():
 
 def test_metrics_endpoint_disabled():
     from app.core.config import settings
-    import app.api.main as m
+    import app.main as m
 
     original = settings.METRICS_ENABLED
     settings.METRICS_ENABLED = False
@@ -92,7 +92,7 @@ def test_start_worker_metrics_server_idempotent_and_scrapable():
 
 def test_in_progress_gauge_settles_to_zero():
     from app.core.config import settings
-    import app.api.main as m
+    import app.main as m
 
     settings.METRICS_ENABLED = True
     client = TestClient(m.app)
