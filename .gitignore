@@ -33,3 +33,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# 공급분석 캐시(로컬)
+scripts/.supply_cache.json
