@@ -241,3 +241,35 @@ async def test_ingest_board_posts_stores_and_idempotent(db_ready):
     async with db_ready.session_scope() as s:
         counts2 = await ingest_board_posts(s, result["source_system"], result["posts"])
     assert counts2["unchanged"] == 1 and counts2["inserted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_ingest_board_posts_persists_detail_fields(db_ready):
+    """상세 보강 필드(일정/장소/주최)가 FestivalEvent 로 저장되고, 나중에 채워지면 update."""
+    from datetime import date
+
+    from sqlalchemy import select
+
+    from app.api.v1.festivals.models import FestivalEvent
+    from app.api.v1.ingestion.service import ingest_board_posts
+
+    url = "https://www.dongjak.go.kr/portal/bbs/B0000173/view.do?nttId=10736698"
+    # 1차: 목록만(상세 전) → 필드 NULL
+    async with db_ready.session_scope() as s:
+        await ingest_board_posts(s, "egov:dongjak", [{"title": "제29회 노들가요제", "detail_url": url}])
+    # 2차: 상세 보강값 포함 → update 로 필드 채움
+    enriched = [{
+        "title": "제29회 노들가요제", "detail_url": url,
+        "start_date": "2026-03-14", "end_date": "2026-03-28",
+        "venue": "동작문화복지센터 소강당", "host_org": "동작문화원",
+    }]
+    async with db_ready.session_scope() as s:
+        counts = await ingest_board_posts(s, "egov:dongjak", enriched)
+    assert counts["updated"] == 1  # 해시 변화 → update
+
+    async with db_ready.session_scope() as s:
+        row = await s.scalar(select(FestivalEvent).where(FestivalEvent.source_record_id == "10736698"))
+    assert row.start_date == date(2026, 3, 14)
+    assert row.end_date == date(2026, 3, 28)
+    assert row.venue == "동작문화복지센터 소강당"
+    assert row.host_org == "동작문화원"

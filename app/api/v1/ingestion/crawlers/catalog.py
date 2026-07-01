@@ -14,6 +14,11 @@ from app.api.v1.ingestion.crawlers.board import (
     query_idx_rows,
     sscmc_rows,
 )
+from app.api.v1.ingestion.crawlers.detail import (
+    parse_detail_dongjak,
+    parse_detail_hwacheon,
+    parse_detail_sscmc,
+)
 
 BOARD_CONFIGS: dict[str, BoardConfig] = {}
 
@@ -34,7 +39,8 @@ _register(
             "?menuNo=201030&pageIndex={page}"
         ),
         parse_rows=egovframe_rows,
-        max_pages=3,
+        parse_detail=parse_detail_dongjak,
+        max_pages=15,  # 노들가요제 25~29회 + 전국노래자랑이 1~15p 에 연도별 분포
     )
 )
 
@@ -51,6 +57,7 @@ _register(
             "?bbsNo=6&key=598&pageIndex={page}"
         ),
         parse_rows=egovframe_rows,
+        parse_detail=parse_detail_hwacheon,
         max_pages=8,
     )
 )
@@ -64,6 +71,7 @@ _register(
         base_url="https://cs.sscmc.or.kr",
         list_url="https://cs.sscmc.or.kr/sdmcs/11?action=list&page={page}",
         parse_rows=sscmc_rows,
+        parse_detail=parse_detail_sscmc,
         max_pages=5,
     )
 )

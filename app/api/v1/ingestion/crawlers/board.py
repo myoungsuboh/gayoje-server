@@ -49,6 +49,11 @@ class BoardPost:
     title: str
     detail_url: str
     posted_date: Optional[str] = None
+    # 상세(view) 페이지 파싱으로 채우는 필드(원시 문자열; 저장 시 날짜는 parse_date 변환).
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    venue: Optional[str] = None
+    host_org: Optional[str] = None
 
 
 # ---- 목록 행 파서(사이트 스킴별) ----
@@ -136,6 +141,34 @@ class BoardConfig:
     parse_rows: Callable[[str, str], list[BoardPost]]
     max_pages: int = 2
     page_pause_sec: float = 1.0
+    # 상세(view) HTML → {start_date,end_date,venue,host_org}(원시 문자열). None 이면 상세 보강 생략.
+    parse_detail: Optional[Callable[[str], dict]] = None
+
+
+async def _enrich_detail(
+    client: Any, gate: RobotsGate, config: BoardConfig, posts: list[BoardPost]
+) -> None:
+    """가요제 게시글의 상세(view) 페이지를 fetch·파싱해 일정/장소/주최를 채운다(robots 게이트)."""
+    for p in posts:
+        if not await gate.allowed(client, p.detail_url):
+            logger.warning("robots 불허 — 상세 생략: %s", p.detail_url)
+            continue
+        try:
+            dhtml = await http_get_text(client, p.detail_url, timeout_sec=45)
+        except Exception as e:  # noqa: BLE001 — 개별 상세 실패는 해당 글만 스킵(제목·링크는 유지)
+            logger.warning("상세 fetch 실패(%s) %s", type(e).__name__, p.detail_url)
+            continue
+        try:
+            fields = config.parse_detail(dhtml) or {}  # type: ignore[misc]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("상세 파싱 실패(%s) %s", type(e).__name__, p.detail_url)
+            fields = {}
+        p.start_date = fields.get("start_date") or p.start_date
+        p.end_date = fields.get("end_date") or p.end_date
+        p.venue = fields.get("venue") or p.venue
+        p.host_org = fields.get("host_org") or p.host_org
+        delay = await gate.crawl_delay(client, p.detail_url)
+        await asyncio.sleep(delay if delay is not None else config.page_pause_sec)
 
 
 async def crawl_board(
@@ -143,10 +176,13 @@ async def crawl_board(
     *,
     gate: RobotsGate,
     client: Any = None,
+    fetch_details: bool = True,
 ) -> dict:
-    """설정된 보드를 robots 게이트 하에 크롤 → 가요제 필터·카운트.
+    """설정된 보드를 robots 게이트 하에 크롤 → 가요제 필터 → (설정 시)상세 보강 → 카운트.
 
-    반환: {board, source_system, crawled, gayoje, pages, blocked, posts:[{title,detail_url}]}.
+    반환: {board, source_system, crawled, gayoje, pages, blocked,
+           posts:[{title,detail_url,start_date,end_date,venue,host_org}]}.
+    fetch_details=False 또는 config.parse_detail=None 이면 상세 보강 생략(목록 필드만).
     """
     import httpx
 
@@ -158,6 +194,8 @@ async def crawl_board(
         headers={"User-Agent": gate.user_agent, "Referer": config.base_url, **DEFAULT_HEADERS},
     )
     posts: list[BoardPost] = []
+    gayoje: list[BoardPost] = []
+    crawled = 0
     pages = 0
     blocked = False
     try:
@@ -179,21 +217,37 @@ async def crawl_board(
             pages += 1
             delay = await gate.crawl_delay(client, url)
             await asyncio.sleep(delay if delay is not None else config.page_pause_sec)
+
+        # detail_url 기준 중복 제거 후 가요제 필터.
+        uniq: dict[str, BoardPost] = {}
+        for p in posts:
+            uniq.setdefault(p.detail_url, p)
+        crawled = len(uniq)
+        gayoje = [p for p in uniq.values() if is_gayoje(p.title)]
+
+        # 상세(view) 보강 — 일정/장소/주최.
+        if fetch_details and config.parse_detail is not None:
+            await _enrich_detail(client, gate, config, gayoje)
     finally:
         if owns:
             await client.aclose()
 
-    # detail_url 기준 중복 제거 후 가요제 필터.
-    uniq: dict[str, BoardPost] = {}
-    for p in posts:
-        uniq.setdefault(p.detail_url, p)
-    gayoje = [p for p in uniq.values() if is_gayoje(p.title)]
     return {
         "board": config.name,
         "source_system": config.source_system,
-        "crawled": len(uniq),
+        "crawled": crawled,
         "gayoje": len(gayoje),
         "pages": pages,
         "blocked": blocked,
-        "posts": [{"title": p.title, "detail_url": p.detail_url} for p in gayoje],
+        "posts": [
+            {
+                "title": p.title,
+                "detail_url": p.detail_url,
+                "start_date": p.start_date,
+                "end_date": p.end_date,
+                "venue": p.venue,
+                "host_org": p.host_org,
+            }
+            for p in gayoje
+        ],
     }

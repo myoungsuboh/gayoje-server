@@ -15,6 +15,7 @@ from app.api.v1.festivals.models import FestivalEvent
 from app.api.v1.ingestion.adapters.base import (
     BaseSourceAdapter,
     NormalizedEvent,
+    parse_date,
     payload_hash,
 )
 
@@ -101,10 +102,16 @@ async def ingest_board_posts(
     """
     counts = _empty_counts()
     for p in posts:
+        # 상세 보강 필드(있으면). 날짜는 원시 문자열 → date 변환. payload_hash 에 포함되어
+        # 상세가 나중에 채워지면 재수집 시 update 로 반영됨.
         raw = {
             "title": p["title"],
             "detail_url": p["detail_url"],
             "source_system": source_system,
+            "start_date": p.get("start_date"),
+            "end_date": p.get("end_date"),
+            "venue": p.get("venue"),
+            "host_org": p.get("host_org"),
         }
         ev = NormalizedEvent(
             source_system=source_system,
@@ -113,11 +120,11 @@ async def ingest_board_posts(
             payload_hash=payload_hash(raw),
             raw_payload=raw,
             title=p["title"],
-            host_org=None,
+            host_org=p.get("host_org"),
             region_name=None,
-            venue=None,
-            start_date=None,
-            end_date=None,
+            venue=p.get("venue"),
+            start_date=parse_date(p.get("start_date")),
+            end_date=parse_date(p.get("end_date")),
         )
         counts[await upsert_event(session, ev)] += 1
     return counts
