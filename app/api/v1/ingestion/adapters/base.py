@@ -181,6 +181,50 @@ async def http_fetch_records(
             await client.aclose()
 
 
+async def http_get_text(
+    client: Any,
+    url: str,
+    *,
+    params: Optional[dict] = None,
+    timeout_sec: int = 30,
+    max_retries: int = 3,
+    backoff_base: float = 1.0,
+) -> str:
+    """HTML/텍스트 GET (재시도/백오프 포함) — 게시판 크롤러용. transient 재시도, 4xx 즉시 raise."""
+    import httpx
+
+    owns = client is None
+    client = client or httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True)
+    try:
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            try:
+                # params=None 로 넘겨야 httpx 가 URL 의 기존 쿼리(pageIndex 등)를 보존한다.
+                # 빈 dict 를 주면 URL 쿼리스트링이 제거되어 페이지네이션이 깨진다.
+                resp = await client.get(url, params=params)
+                if resp.status_code >= 500 or resp.status_code == 429:
+                    raise httpx.HTTPStatusError(
+                        f"transient HTTP {resp.status_code}",
+                        request=resp.request, response=resp,
+                    )
+                resp.raise_for_status()
+                return resp.text
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                last_exc = e
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                if not (code >= 500 or code == 429):
+                    raise
+                last_exc = e
+            if attempt < max_retries:
+                await asyncio.sleep(backoff_base * (2 ** attempt) + random.uniform(0, 0.4))
+        assert last_exc is not None
+        raise last_exc
+    finally:
+        if owns:
+            await client.aclose()
+
+
 class BaseSourceAdapter(ABC):
     """소스 어댑터 베이스 — 공통 normalize 제공, fetch_raw 만 서브클래스 구현."""
 

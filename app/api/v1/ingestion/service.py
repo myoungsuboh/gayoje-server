@@ -5,11 +5,18 @@ raw record 목록 → adapter.normalize(가요제 필터) → (source_system, so
 """
 from __future__ import annotations
 
+import hashlib
+import re
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.festivals.models import FestivalEvent
-from app.api.v1.ingestion.adapters.base import BaseSourceAdapter, NormalizedEvent
+from app.api.v1.ingestion.adapters.base import (
+    BaseSourceAdapter,
+    NormalizedEvent,
+    payload_hash,
+)
 
 
 async def upsert_event(session: AsyncSession, ev: NormalizedEvent) -> str:
@@ -67,5 +74,48 @@ async def ingest_records(
         if ev is None:
             counts["skipped_non_gayoje"] += 1
             continue
+        counts[await upsert_event(session, ev)] += 1
+    return counts
+
+
+_BOARD_ID_PAT = re.compile(r"(?:nttId|idx|articleNo|seq|bltnNo)=(\d+)", re.I)
+
+
+def _board_record_id(detail_url: str) -> str:
+    """게시판 상세 URL 에서 안정적 record id 추출(nttId/idx…), 없으면 URL 해시."""
+    m = _BOARD_ID_PAT.search(detail_url)
+    if m:
+        return m.group(1)
+    return hashlib.sha1(detail_url.encode("utf-8")).hexdigest()[:24]
+
+
+async def ingest_board_posts(
+    session: AsyncSession, source_system: str, posts: list[dict]
+) -> dict:
+    """크롤로 얻은 가요제 게시글(제목+상세URL)을 멱등 upsert.
+
+    posts 는 crawl_board 결과의 이미 가요제-필터된 목록(dict: title, detail_url).
+    날짜/장소/주최는 상세 본문 파싱(후속) 전까지 NULL. 제목·링크·출처만 저장(재호스팅 안 함).
+    """
+    counts = _empty_counts()
+    for p in posts:
+        raw = {
+            "title": p["title"],
+            "detail_url": p["detail_url"],
+            "source_system": source_system,
+        }
+        ev = NormalizedEvent(
+            source_system=source_system,
+            source_record_id=_board_record_id(p["detail_url"]),
+            source_url=p["detail_url"],
+            payload_hash=payload_hash(raw),
+            raw_payload=raw,
+            title=p["title"],
+            host_org=None,
+            region_name=None,
+            venue=None,
+            start_date=None,
+            end_date=None,
+        )
         counts[await upsert_event(session, ev)] += 1
     return counts
