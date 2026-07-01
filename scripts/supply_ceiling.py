@@ -12,6 +12,7 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from app.api.v1.ingestion.adapters.base import http_fetch_records, parse_date
 from app.api.v1.ingestion.adapters.cultural_festival import CulturalFestivalAdapter
 from app.api.v1.ingestion.adapters.standard_performance import StandardPerformanceAdapter
 from app.api.v1.ingestion.taxonomy import (
@@ -35,8 +36,20 @@ async def fetch_all(force: bool = False) -> list[dict]:
     key = settings.data_go_kr_service_keys[0]
     rows: list[dict] = []
     for adapter in ADAPTERS:
-        for pg in range(1, 16):
-            recs = await adapter.fetch_raw(key, num_of_rows=1000, page_no=pg)
+        for pg in range(1, 25):
+            # 어댑터 대신 http_fetch_records 직접 호출. 대용량(1000행)이 지연 시 timeout 걸려
+            # 500행으로 낮추고 timeout 넉넉히(payload 작을수록 응답 빠름). 실패 페이지는 스킵.
+            try:
+                recs = await http_fetch_records(
+                    key, adapter.DEFAULT_BASE_URL,
+                    num_of_rows=500, page_no=pg,
+                    extra_params={"type": "json"},
+                    timeout_sec=40, max_retries=2,
+                )
+            except Exception as e:  # noqa: BLE001 — 느린/실패 페이지는 스킵(부분 집계 허용)
+                print(f"  [fetch] {adapter.SOURCE_KEY} p{pg} 실패 {type(e).__name__} — 스킵", flush=True)
+                continue
+            print(f"  [fetch] {adapter.SOURCE_KEY} p{pg}: {len(recs)}건", flush=True)
             if not recs:
                 break
             for r in recs:
@@ -44,9 +57,15 @@ async def fetch_all(force: bool = False) -> list[dict]:
                     "title": adapter.field(r, "title"),
                     "address": adapter.field(r, "address"),
                     "host": adapter.field(r, "host"),
+                    "start": adapter.field(r, "start"),
+                    "end": adapter.field(r, "end"),
                     "source": adapter.SOURCE_KEY,
                 })
             await asyncio.sleep(0.2)
+    # 안전장치: fetch 대량 실패(예: API 지연)로 rows 가 빈약하면 기존 캐시를 덮지 않는다.
+    if len(rows) < 1000 and CACHE.exists():
+        print(f"  [fetch] 수집 {len(rows)}건뿐 — 기존 캐시 보존(덮어쓰기 안 함)", flush=True)
+        return json.loads(CACHE.read_text(encoding="utf-8"))
     CACHE.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
     return rows
 
@@ -136,6 +155,61 @@ def analyze(rows: list[dict]) -> None:
         print(f"  (시도미상){unknown:>7}")
     zero = [s for s in SIDO_17 if per_sido.get(s, 0) == 0]
     print(f"\n  공공데이터 0커버리지 시도({len(zero)}): {', '.join(zero) or '없음'}")
+
+    print("\n" + "=" * 72)
+    print("[4] 개최월 분포 (가요제-proper) — 21이 구조적 천장인지 7월 스냅샷 착시인지")
+    print("=" * 72)
+
+    def _md(s):
+        d = parse_date(s)
+        return (d.month, d.year) if d else (None, None)
+
+    # 개최월은 '실제 개최 인스턴스'(dedup 전 core)로 계절성 파악.
+    core_inst = [m for m in matched if not _is_choir(m["bucket"])]
+
+    def _eclass(title: str) -> str:
+        t = (title or "").replace(" ", "")
+        if "전국노래자랑" in t:
+            return "KBS전국노래자랑"
+        if any(k in t for k in ("축제", "페스티벌", "양파마늘", "글로벌", "강변",
+                                "서천", "마늘", "불교", "가톨릭", "윈터아트")):
+            return "지역축제연계"
+        return "단독개최"
+
+    months: Counter = Counter()
+    years: Counter = Counter()
+    no_date = 0
+    for m in core_inst:
+        mo, yr = _md(m.get("start"))
+        if mo:
+            months[mo] += 1
+            years[yr] += 1
+        else:
+            no_date += 1
+
+    dated = sum(months.values())
+    print(f"  대상 인스턴스: {len(core_inst)} (날짜 있음 {dated}, 날짜 없음 {no_date})")
+    print("\n  개최월 분포:")
+    peak = max(months.values()) if months else 0
+    for mo in range(1, 13):
+        c = months.get(mo, 0)
+        bar = "█" * c
+        mark = " ◀PEAK" if c == peak and c > 0 else ""
+        print(f"    {mo:2d}월 {c:2d} {bar}{mark}")
+    autumn = sum(months.get(x, 0) for x in (9, 10, 11))
+    print(f"\n  가을(9~11월): {autumn}/{dated} = {round(100*autumn/dated) if dated else 0}%")
+    print(f"  7월(현재): {months.get(7, 0)}")
+
+    print("\n  개최년도 분포(단일 스냅샷 vs 다년 누적 판별):")
+    for yr in sorted(years):
+        print(f"    {yr}: {years[yr]}")
+
+    print("\n  유형 분리(개최 성격):")
+    cls = Counter(_eclass(m["title"]) for m in core_inst)
+    for label in ("KBS전국노래자랑", "지역축제연계", "단독개최"):
+        insts = [m for m in core_inst if _eclass(m["title"]) == label]
+        mos = sorted({_md(m.get("start"))[0] for m in insts if _md(m.get("start"))[0]})
+        print(f"    {label:14s} {cls.get(label, 0):2d}건  개최월={mos or '연중/미상'}")
 
 
 async def main():
