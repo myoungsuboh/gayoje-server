@@ -78,7 +78,9 @@ async def ingest_records(
     return counts
 
 
-_BOARD_ID_PAT = re.compile(r"(?:nttId|idx|articleNo|seq|bltnNo)=(\d+)", re.I)
+_BOARD_ID_PAT = re.compile(
+    r"(?:nttId|nttNo|pblprfrNo|idx|articleNo|seq|bltnNo|action-value)=(\d+)", re.I
+)
 
 
 def _board_record_id(detail_url: str) -> str:

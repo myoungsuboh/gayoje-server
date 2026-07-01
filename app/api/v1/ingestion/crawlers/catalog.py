@@ -12,6 +12,7 @@ from app.api.v1.ingestion.crawlers.board import (
     BoardConfig,
     egovframe_rows,
     query_idx_rows,
+    sscmc_rows,
 )
 
 BOARD_CONFIGS: dict[str, BoardConfig] = {}
@@ -34,6 +35,36 @@ _register(
         ),
         parse_rows=egovframe_rows,
         max_pages=3,
+    )
+)
+
+# 화천문화재단 청소년수련관 커뮤니티 게시판(eGovFrame selectBbsNttView?nttNo) —
+# T&U 전국청소년가요제(제13~15회) 게재. robots 무규칙(허용), 정직 봇 UA 200.
+# 가요제 글이 2~7페이지에 연도별 분포 → max_pages 넉넉히.
+_register(
+    BoardConfig(
+        name="hwacheon_youth",
+        source_system="egov:hwacheon",
+        base_url="https://www.ihc.go.kr",
+        list_url=(
+            "https://www.ihc.go.kr/hcyc/selectBbsNttList.do"
+            "?bbsNo=6&key=598&pageIndex={page}"
+        ),
+        parse_rows=egovframe_rows,
+        max_pages=8,
+    )
+)
+
+# 서대문문화체육회관 공연안내(전체일정) 보드(자체 CMS ?action=read&action-value) —
+# 서대문구민가요제 게재. robots 전면 허용, 정직 봇 UA 200.
+_register(
+    BoardConfig(
+        name="sscmc_events",
+        source_system="egov:sscmc",
+        base_url="https://cs.sscmc.or.kr",
+        list_url="https://cs.sscmc.or.kr/sdmcs/11?action=list&page={page}",
+        parse_rows=sscmc_rows,
+        max_pages=5,
     )
 )
 

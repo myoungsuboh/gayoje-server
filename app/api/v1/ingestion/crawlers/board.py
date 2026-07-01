@@ -56,28 +56,47 @@ class BoardPost:
 # 갤러리형을 고려해, 상세ID별로 '텍스트가 있는' 앵커(=제목)를 채택한다.
 
 
-def _rows_by_id(html: str, base_url: str, pattern: re.Pattern) -> list[BoardPost]:
+def _rows_by_id(
+    html: str,
+    page_url: str,
+    pattern: re.Pattern,
+    title_of: Callable[[str], str] = clean_text,
+) -> list[BoardPost]:
+    """(href, id, inner) 3그룹 정규식으로 목록 행 추출. id별 최초의 '제목 있는' 앵커 채택.
+
+    page_url = 목록 페이지 URL(상대 href 절대화 기준). 같은 글이 썸네일+제목 앵커로 중복돼도
+    id 기준 1건, 제목 텍스트가 있는 앵커만 채택(갤러리형 썸네일 앵커 배제).
+    """
     by_id: dict[str, BoardPost] = {}
     for m in pattern.finditer(html):
         href, rec_id, inner = m.group(1), m.group(2), m.group(3)
-        title = clean_text(inner)
-        if not title or len(title) < 2:
-            continue  # 썸네일 앵커(img만) 등 → 제목 앵커를 기다림
-        if rec_id in by_id:
+        title = title_of(inner)
+        if not title or len(title) < 2 or rec_id in by_id:
             continue
-        url = urljoin(base_url, href.replace("&amp;", "&"))
+        url = urljoin(page_url, href.replace("&amp;", "&"))
         by_id[rec_id] = BoardPost(title=title, detail_url=url)
     return list(by_id.values())
 
 
+# eGovFrame 표준 게시판: view.do?nttId (동작구형) + selectBbsNttView.do?nttNo (화천형) 모두 매칭.
 _EGOV_PAT = re.compile(
-    r'href="([^"]*view\.do[^"]*?nttId=(\d+)[^"]*)"[^>]*>(.*?)</a>', re.I | re.S
+    r'href="([^"]*(?:view\.do[^"]*?nttId|selectBbsNttView\.do[^"]*?nttNo)=(\d+)[^"]*)"'
+    r"[^>]*>(.*?)</a>",
+    re.I | re.S,
 )
+_BADGE = re.compile(r"핫이슈|\bNEW\b|\bHOT\b")
 
 
-def egovframe_rows(html: str, base_url: str) -> list[BoardPost]:
-    """eGovFrame 표준 보드: <a href='...view.do?...nttId=N...'>제목</a> (갤러리형 포함)."""
-    return _rows_by_id(html, base_url, _EGOV_PAT)
+def _egov_title(inner: str) -> str:
+    return _WS.sub(" ", _BADGE.sub("", clean_text(inner))).strip()
+
+
+def egovframe_rows(html: str, page_url: str) -> list[BoardPost]:
+    """eGovFrame 보드: <a href='...view.do?nttId=N | ...selectBbsNttView.do?nttNo=N'>제목</a>.
+
+    동작구(갤러리 view.do?nttId) + 화천(selectBbsNttView.do?nttNo) 공용. '핫이슈' 배지 제거.
+    """
+    return _rows_by_id(html, page_url, _EGOV_PAT, _egov_title)
 
 
 _QUERY_IDX_PAT = re.compile(
@@ -85,9 +104,27 @@ _QUERY_IDX_PAT = re.compile(
 )
 
 
-def query_idx_rows(html: str, base_url: str) -> list[BoardPost]:
+def query_idx_rows(html: str, page_url: str) -> list[BoardPost]:
     """통영식 .web 보드: <a href='?gcode=..&idx=N&amode=view'>제목</a>."""
-    return _rows_by_id(html, base_url, _QUERY_IDX_PAT)
+    return _rows_by_id(html, page_url, _QUERY_IDX_PAT)
+
+
+# 서대문문화체육회관(sscmc) 자체 CMS: <a href='?action=read&action-value=N.0'>…<p class="tit">제목</p></a>
+_SSCMC_PAT = re.compile(
+    r'href="([^"]*action=read[^"]*?action-value=(\d+)\.0[^"]*)"[^>]*>(.*?)</a>',
+    re.I | re.S,
+)
+_SSCMC_TIT = re.compile(r'<p class="tit">(.*?)</p>', re.S)
+
+
+def _sscmc_title(inner: str) -> str:
+    m = _SSCMC_TIT.search(inner)
+    return clean_text(m.group(1)) if m else ""
+
+
+def sscmc_rows(html: str, page_url: str) -> list[BoardPost]:
+    """서대문문화체육회관 보드: 앵커 내부 <p class='tit'> 가 제목(날짜/상태 라벨과 분리)."""
+    return _rows_by_id(html, page_url, _SSCMC_PAT, _sscmc_title)
 
 
 @dataclass
@@ -135,7 +172,7 @@ async def crawl_board(
             except Exception as e:  # noqa: BLE001 — 사이트별 장애는 해당 보드만 스킵
                 logger.warning("보드 fetch 실패(%s) %s", type(e).__name__, url)
                 break
-            rows = config.parse_rows(html, config.base_url)
+            rows = config.parse_rows(html, url)  # url=목록 페이지(상대 href 절대화 기준)
             if not rows:
                 break
             posts.extend(rows)

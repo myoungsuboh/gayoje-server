@@ -6,18 +6,21 @@ from pathlib import Path
 import httpx
 import pytest
 
+from app.api.v1.ingestion.adapters.base import is_gayoje
 from app.api.v1.ingestion.crawlers.board import (
     BoardConfig,
     crawl_board,
     egovframe_rows,
     query_idx_rows,
+    sscmc_rows,
 )
 from app.api.v1.ingestion.robots import RobotsGate
 from app.api.v1.ingestion.service import _board_record_id
 
-FIXTURE = (Path(__file__).parent / "fixtures" / "egov_board_dongjak.html").read_text(
-    encoding="utf-8"
-)
+_FIX = Path(__file__).parent / "fixtures"
+FIXTURE = (_FIX / "egov_board_dongjak.html").read_text(encoding="utf-8")
+HWACHEON = (_FIX / "egov_bbs_hwacheon.html").read_text(encoding="utf-8")
+SSCMC = (_FIX / "board_sscmc.html").read_text(encoding="utf-8")
 
 TONGYEONG_SNIPPET = """
 <table><tbody>
@@ -52,6 +55,39 @@ def test_query_idx_rows():
     assert any("통영가요제" in p.title for p in posts)
     # HTML 엔티티(&amp;) 복원된 절대 URL
     assert any("idx=661503" in u and "&amp;" not in u for u in ids)
+
+
+def test_egovframe_rows_bbs_variant_hwacheon():
+    """selectBbsNttView?nttNo 변형(화천) 도 egovframe_rows 로 파싱, '핫이슈' 배지 제거."""
+    page = "https://www.ihc.go.kr/hcyc/selectBbsNttList.do?bbsNo=6&key=598&pageIndex=3"
+    posts = egovframe_rows(HWACHEON, page)
+    assert len(posts) == 3  # nttNo 3개
+    gayoje = [p for p in posts if is_gayoje(p.title)]
+    assert len(gayoje) == 2  # T&U 청소년가요제 2건(모집/발표), 특강은 제외
+    top = next(p for p in posts if "참가팀 모집" in p.title)
+    assert "핫이슈" not in top.title  # 배지 제거됨
+    assert top.detail_url.startswith("https://www.ihc.go.kr/hcyc/selectBbsNttView.do")
+    assert "nttNo=12345" in top.detail_url
+
+
+def test_egovframe_bbs_record_id():
+    assert _board_record_id(
+        "https://www.ihc.go.kr/hcyc/selectBbsNttView.do?key=598&bbsNo=6&nttNo=12345"
+    ) == "12345"
+
+
+def test_sscmc_rows_title_from_tit():
+    """서대문: 앵커 내부 <p class='tit'> 가 제목(날짜/상태 라벨 배제), query-only href 절대화."""
+    page = "https://cs.sscmc.or.kr/sdmcs/11?action=list&page=2"
+    posts = sscmc_rows(SSCMC, page)
+    assert len(posts) == 3
+    gayoje = [p for p in posts if is_gayoje(p.title)]
+    assert [p.title for p in gayoje] == ["[북아현아트홀] 희망시대! 2025 서대문구민 가요제"]
+    g = gayoje[0]
+    # query-only 상대 href 는 목록 경로(/sdmcs/11) 기준으로 절대화
+    assert g.detail_url.startswith("https://cs.sscmc.or.kr/sdmcs/11?action=read")
+    assert "action-value=10610.0" in g.detail_url
+    assert _board_record_id(g.detail_url) == "10610"
 
 
 # ---- 가요제 필터(크롤 관점) ----
