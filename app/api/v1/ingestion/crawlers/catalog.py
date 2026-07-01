@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.api.v1.ingestion.crawlers.board import (
     BoardConfig,
     egovframe_rows,
+    gunsan_rows,
     query_idx_rows,
     sscmc_rows,
 )
@@ -73,6 +74,33 @@ _register(
         parse_rows=sscmc_rows,
         parse_detail=parse_detail_sscmc,
         max_pages=5,
+    )
+)
+
+# 군산예술의전당 공지 게시판(모듈형 /arts/m1528/view/{id}) — 노사가요제 개최 시 게시.
+# robots 전면 허용, 정직 봇 UA 200. 현재는 연주회·대관·공고 위주(가요제 시즌성 0건).
+# 상세 파서는 노사가요제 실게시 후 샘플 확보해 추가 예정(parse_detail 미설정).
+_register(
+    BoardConfig(
+        name="gunsan_arts",
+        source_system="egov:gunsan",
+        base_url="https://www.gunsan.go.kr",
+        list_url="https://www.gunsan.go.kr/arts/m1528/list?s_idx={page}",
+        parse_rows=gunsan_rows,
+        max_pages=3,
+    )
+)
+
+# 장흥문화예술회관 공지사항(?idx=&mode=view) — 대학가요제 리턴즈 등 개최 시 게시.
+# robots 허용(Crawl-delay 1), 정직 봇 UA 200. 현재 가요제 시즌성 0건.
+_register(
+    BoardConfig(
+        name="jangheung_notice",
+        source_system="egov:jangheung",
+        base_url="http://art.jangheung.go.kr",
+        list_url="http://art.jangheung.go.kr/art/community/notice?page={page}",
+        parse_rows=query_idx_rows,
+        max_pages=3,
     )
 )
 

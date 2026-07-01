@@ -11,6 +11,7 @@ from app.api.v1.ingestion.crawlers.board import (
     BoardConfig,
     crawl_board,
     egovframe_rows,
+    gunsan_rows,
     query_idx_rows,
     sscmc_rows,
 )
@@ -55,6 +56,29 @@ def test_query_idx_rows():
     assert any("통영가요제" in p.title for p in posts)
     # HTML 엔티티(&amp;) 복원된 절대 URL
     assert any("idx=661503" in u and "&amp;" not in u for u in ids)
+
+
+def test_query_idx_rows_mode_view_variant():
+    """장흥식 ?idx=&mode=view(amode 아님)도 query_idx_rows 로 파싱."""
+    snippet = (
+        '<p class="n_tit"><a href="/art/community/notice?idx=777&amp;mode=view">'
+        "제3회 장흥 트로트 가요제 안내</a></p>"
+    )
+    posts = query_idx_rows(snippet, "http://art.jangheung.go.kr/art/community/notice?page=1")
+    assert len(posts) == 1
+    assert "트로트 가요제" in posts[0].title
+    assert posts[0].detail_url.startswith("http://art.jangheung.go.kr/art/community/notice?idx=777")
+
+
+def test_gunsan_rows():
+    """군산 모듈형 /arts/m1528/view/{id} 파싱 + 가요제 필터."""
+    html = (_FIX / "board_gunsan.html").read_text(encoding="utf-8")
+    posts = gunsan_rows(html, "https://www.gunsan.go.kr/arts/m1528/list?s_idx=1")
+    assert len(posts) == 3
+    gayoje = [p for p in posts if is_gayoje(p.title)]
+    assert len(gayoje) == 1 and "노사가요제" in gayoje[0].title
+    assert gayoje[0].detail_url == "https://www.gunsan.go.kr/arts/m1528/view/50123?s_idx=1"
+    assert _board_record_id(gayoje[0].detail_url) == "50123"
 
 
 def test_egovframe_rows_bbs_variant_hwacheon():

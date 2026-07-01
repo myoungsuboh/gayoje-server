@@ -105,13 +105,24 @@ def egovframe_rows(html: str, page_url: str) -> list[BoardPost]:
 
 
 _QUERY_IDX_PAT = re.compile(
-    r'href="(\?[^"]*idx=(\d+)[^"]*amode=view[^"]*)"[^>]*>(.*?)</a>', re.I | re.S
+    r'href="([^"]*\?[^"]*idx=(\d+)[^"]*(?:amode|mode)=view[^"]*)"[^>]*>(.*?)</a>', re.I | re.S
 )
 
 
 def query_idx_rows(html: str, page_url: str) -> list[BoardPost]:
-    """통영식 .web 보드: <a href='?gcode=..&idx=N&amode=view'>제목</a>."""
+    """쿼리형 보드: <a href='...idx=N&(a)mode=view'>제목</a> (통영 amode / 장흥 mode 공용)."""
     return _rows_by_id(html, page_url, _QUERY_IDX_PAT)
+
+
+# 군산예술의전당 모듈형: /arts/m####/view/{id} (목록 /arts/m####/list?s_idx=N).
+_GUNSAN_PAT = re.compile(
+    r'href="(/arts/m\d+/view/(\d+)[^"]*)"[^>]*>(.*?)</a>', re.I | re.S
+)
+
+
+def gunsan_rows(html: str, page_url: str) -> list[BoardPost]:
+    """군산예술의전당 보드: <a href='/arts/m1528/view/{id}?s_idx=N'>제목</a>."""
+    return _rows_by_id(html, page_url, _GUNSAN_PAT)
 
 
 # 서대문문화체육회관(sscmc) 자체 CMS: <a href='?action=read&action-value=N.0'>…<p class="tit">제목</p></a>

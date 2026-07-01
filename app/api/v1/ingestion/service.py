@@ -79,13 +79,19 @@ async def ingest_records(
     return counts
 
 
+# 경로형 상세 id (/view/{id}, /read/{id}) — 군산 등 모듈형.
+_BOARD_PATH_ID = re.compile(r"/(?:view|read|article)/(\d+)")
+# 쿼리형 상세 id. 'idx' 앞 경계로 s_idx(페이지네이션) 오매칭 배제.
 _BOARD_ID_PAT = re.compile(
-    r"(?:nttId|nttNo|pblprfrNo|idx|articleNo|seq|bltnNo|action-value)=(\d+)", re.I
+    r"(?:nttId|nttNo|pblprfrNo|articleNo|bltnNo|seq|action-value|(?<![a-z_])idx)=(\d+)", re.I
 )
 
 
 def _board_record_id(detail_url: str) -> str:
-    """게시판 상세 URL 에서 안정적 record id 추출(nttId/idx…), 없으면 URL 해시."""
+    """게시판 상세 URL 에서 안정적 record id 추출(경로형 /view/{id} 우선 → 쿼리형), 없으면 URL 해시."""
+    m = _BOARD_PATH_ID.search(detail_url)
+    if m:
+        return m.group(1)
     m = _BOARD_ID_PAT.search(detail_url)
     if m:
         return m.group(1)
